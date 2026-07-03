@@ -5,7 +5,7 @@
 
 export const SAMPLE = {
   tournament: {
-    name: "بطولة الأحياء",
+    name: "أحفاد الصحابة",
     description: "برنامج مباريات البطولة",
     start_date: "2026-07-03",
     end_date: "2026-07-13",

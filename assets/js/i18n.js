@@ -67,7 +67,7 @@ export const t = {
 
   newTournament: "بطولة جديدة",
   loadSample: "تحميل بطولة تجريبية",
-  loadSampleConfirm: "إنشاء بطولة تجريبية كاملة (بطولة الأحياء) ببياناتها من ملف الإكسل؟",
+  loadSampleConfirm: "إنشاء بطولة «أحفاد الصحابة» كاملة ببياناتها من ملف الإكسل؟",
   editTournament: "تعديل البطولة",
   tName: "اسم البطولة",
   tDesc: "الوصف",
