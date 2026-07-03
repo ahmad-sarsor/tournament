@@ -16,15 +16,6 @@ export function groupByDay(matches) {
   return [...map.entries()]; // [[date, matches], ...] محافظ على ترتيب الإدخال
 }
 
-// أفاتار الفريق: حروف أولى + لون ثابت مشتقّ من الاسم
-export function avatar(name, size) {
-  const n = String(name || "").trim();
-  const initials = !n ? "؟" : n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("");
-  let h = 0;
-  for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
-  return el("span.avatar.av-" + (h % 6), { title: n || "—", style: size ? `--sz:${size}px` : null }, [initials]);
-}
-
 // آخر النتائج لفريق (حتى ٥) لعرض «السجل»
 function teamForm(teamId, matches) {
   const played = matches
@@ -87,7 +78,7 @@ export function matchCard(m, teamById, groupById, opts = {}) {
       String(m.away_score ?? 0),
     ]);
   } else {
-    scoreEl = el("div.score.pending", { text: m.match_time ? formatTime(m.match_time) : t.matchPending });
+    scoreEl = el("div.score.pending", { text: "–" }); // فاصل «ضد»؛ الوقت يظهر على الجانب
   }
 
   const timeCol = el("div.time", {}, [
@@ -99,9 +90,11 @@ export function matchCard(m, teamById, groupById, opts = {}) {
   const hasEvents = events.length > 0;
   const matchEl = el("div.match" + (live ? ".is-live" : "") + (hasEvents ? ".has-events" : ""), {}, [
     timeCol,
-    el("div.team.home" + (homeWin ? ".winner" : ""), {}, [avatar(homeName, 30), el("span.name", { title: homeName, text: homeName })]),
-    scoreEl,
-    el("div.team.away" + (awayWin ? ".winner" : ""), {}, [avatar(awayName, 30), el("span.name", { title: awayName, text: awayName })]),
+    el("div.match-center", {}, [
+      el("div.team.home" + (homeWin ? ".winner" : ""), {}, [el("span.name", { title: homeName, text: homeName })]),
+      scoreEl,
+      el("div.team.away" + (awayWin ? ".winner" : ""), {}, [el("span.name", { title: awayName, text: awayName })]),
+    ]),
   ]);
 
   if (!hasEvents) return matchEl;
@@ -173,7 +166,7 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
     const gdClass = r.gd > 0 ? ".pos" : r.gd < 0 ? ".neg" : "";
     body.appendChild(el("tr" + (qualify ? ".qualify" : "") + (champion ? ".champion" : ""), {}, [
       el("td", {}, [el("span.rank", { text: String(r.rank) })]),
-      el("td.team-col", {}, [el("span.team-cell", {}, [avatar(r.team.name, 26), el("span.team-name", { text: r.team.name })])]),
+      el("td.team-col", {}, [el("span.team-name", { text: r.team.name })]),
       el("td", { text: String(r.played) }),
       el("td", { text: String(r.won) }),
       el("td", { text: String(r.drawn) }),
