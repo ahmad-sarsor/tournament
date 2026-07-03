@@ -14,9 +14,9 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ✍️ عدّل هذه القائمة: ضع بريد/بُرد المديرين (بفاصلة بينها)
+    // ✍️ بريد/بُرد المديرين (يجب أن يطابق مستخدم Firebase Authentication)
     function adminEmails() {
-      return ['admin@example.com'];
+      return ['ahmad.kefah11sar@gmail.com'];
     }
 
     function isAdmin() {
