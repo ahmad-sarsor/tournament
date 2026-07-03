@@ -16,6 +16,33 @@ export function groupByDay(matches) {
   return [...map.entries()]; // [[date, matches], ...] محافظ على ترتيب الإدخال
 }
 
+// أفاتار الفريق: حروف أولى + لون ثابت مشتقّ من الاسم
+export function avatar(name, size) {
+  const n = String(name || "").trim();
+  const initials = !n ? "؟" : n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("");
+  let h = 0;
+  for (let i = 0; i < n.length; i++) h = (h * 31 + n.charCodeAt(i)) >>> 0;
+  return el("span.avatar.av-" + (h % 6), { title: n || "—", style: size ? `--sz:${size}px` : null }, [initials]);
+}
+
+// آخر النتائج لفريق (حتى ٥) لعرض «السجل»
+function teamForm(teamId, matches) {
+  const played = matches
+    .filter((m) => isCounted(m) && (m.home_team_id === teamId || m.away_team_id === teamId))
+    .sort((a, b) => ((a.match_date || "") + (a.match_time || "")).localeCompare((b.match_date || "") + (b.match_time || "")));
+  return played.slice(-5).map((m) => {
+    const isHome = m.home_team_id === teamId;
+    const gf = isHome ? m.home_score : m.away_score;
+    const ga = isHome ? m.away_score : m.home_score;
+    return gf > ga ? "w" : gf < ga ? "l" : "d";
+  });
+}
+function formGuide(results) {
+  const wrap = el("span.form-guide");
+  for (const r of results) wrap.appendChild(el("span.form-dot." + r, { text: { w: "ف", d: "ت", l: "خ" }[r] }));
+  return wrap;
+}
+
 // أيقونة/تسمية حدث المباراة
 export function eventIcon(type) { return { goal: "⚽", yellow: "🟨", red: "🟥" }[type] || "•"; }
 export function eventTypeLabel(type) { return t["ev_" + type] || type; }
@@ -72,9 +99,9 @@ export function matchCard(m, teamById, groupById, opts = {}) {
   const hasEvents = events.length > 0;
   const matchEl = el("div.match" + (live ? ".is-live" : "") + (hasEvents ? ".has-events" : ""), {}, [
     timeCol,
-    el("div.team.home" + (homeWin ? ".winner" : ""), {}, [el("span.name", { title: homeName, text: homeName })]),
+    el("div.team.home" + (homeWin ? ".winner" : ""), {}, [avatar(homeName, 30), el("span.name", { title: homeName, text: homeName })]),
     scoreEl,
-    el("div.team.away" + (awayWin ? ".winner" : ""), {}, [el("span.name", { title: awayName, text: awayName })]),
+    el("div.team.away" + (awayWin ? ".winner" : ""), {}, [avatar(awayName, 30), el("span.name", { title: awayName, text: awayName })]),
   ]);
 
   if (!hasEvents) return matchEl;
@@ -136,15 +163,17 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
       el("th", { text: t.th_ga }),
       el("th", { text: t.th_gd }),
       el("th", { text: t.th_pts }),
+      el("th", { text: t.th_form }),
     ]),
   ]);
   const body = el("tbody");
   for (const r of rows) {
     const qualify = qualifiers > 0 && r.rank <= qualifiers && r.played > 0;
+    const champion = r.rank === 1 && r.played > 0;
     const gdClass = r.gd > 0 ? ".pos" : r.gd < 0 ? ".neg" : "";
-    body.appendChild(el("tr" + (qualify ? ".qualify" : ""), {}, [
+    body.appendChild(el("tr" + (qualify ? ".qualify" : "") + (champion ? ".champion" : ""), {}, [
       el("td", {}, [el("span.rank", { text: String(r.rank) })]),
-      el("td.team-col", {}, [el("span.team-name", { text: r.team.name })]),
+      el("td.team-col", {}, [el("span.team-cell", {}, [avatar(r.team.name, 26), el("span.team-name", { text: r.team.name })])]),
       el("td", { text: String(r.played) }),
       el("td", { text: String(r.won) }),
       el("td", { text: String(r.drawn) }),
@@ -153,6 +182,7 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
       el("td", { text: String(r.ga) }),
       el("td.pos-diff" + gdClass, { text: (r.gd > 0 ? "+" : "") + r.gd }),
       el("td.pts", { text: String(r.points) }),
+      el("td", {}, [formGuide(teamForm(r.team.id, matches))]),
     ]));
   }
   return el("div.table-wrap", {}, [el("table.standings", {}, [head, body])]);
