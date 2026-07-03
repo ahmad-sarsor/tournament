@@ -29,6 +29,8 @@ service cloud.firestore {
     match /groups/{id}      { allow read: if true; allow write: if isAdmin(); }
     match /teams/{id}       { allow read: if true; allow write: if isAdmin(); }
     match /matches/{id}     { allow read: if true; allow write: if isAdmin(); }
+    match /players/{id}     { allow read: if true; allow write: if isAdmin(); }
+    match /events/{id}      { allow read: if true; allow write: if isAdmin(); }
 
     // أي مجموعة أخرى: ممنوعة افتراضياً
     match /{document=**} { allow read, write: if false; }

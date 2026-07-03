@@ -64,6 +64,7 @@ export function toast(message, type = "") {
 
 const FOCUSABLE = 'a[href],button:not([disabled]),textarea,input,select,[tabindex]:not([tabindex="-1"])';
 let modalUid = 0;
+const modalStack = []; // النوافذ المتراكمة — فقط العليا تستجيب للوحة المفاتيح
 
 // نافذة منبثقة — تُعيد دالة إغلاق. onDismiss يُستدعى عند الإغلاق بـ Escape/الخلفية/×
 export function openModal({ title, body, footer, onDismiss }) {
@@ -73,6 +74,8 @@ export function openModal({ title, body, footer, onDismiss }) {
 
   const close = () => {
     if (closed) return; closed = true;
+    const si = modalStack.indexOf(close);
+    if (si >= 0) modalStack.splice(si, 1);
     document.removeEventListener("keydown", onKey);
     backdrop.remove();
     if (prevFocus && typeof prevFocus.focus === "function") prevFocus.focus();
@@ -92,6 +95,7 @@ export function openModal({ title, body, footer, onDismiss }) {
   }, [dialog]);
 
   const onKey = (e) => {
+    if (modalStack[modalStack.length - 1] !== close) return; // فقط النافذة العليا تتفاعل
     if (e.key === "Escape") { e.preventDefault(); dismiss(); return; }
     if (e.key === "Tab") {
       const items = [...dialog.querySelectorAll(FOCUSABLE)].filter((n) => n.offsetParent !== null);
@@ -102,6 +106,7 @@ export function openModal({ title, body, footer, onDismiss }) {
     }
   };
   document.addEventListener("keydown", onKey);
+  modalStack.push(close);
   document.body.appendChild(backdrop);
 
   // ننقل التركيز: أول حقل، وإلا زر الإجراء الرئيسي، وإلا أول عنصر قابل للتركيز

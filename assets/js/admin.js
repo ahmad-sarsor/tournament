@@ -5,12 +5,15 @@ import { isConfigured } from "./firebase.js";
 import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog } from "./util.js";
 import * as api from "./data.js";
-import { groupByDay } from "./render.js";
+import { groupByDay, eventIcon } from "./render.js";
 
 const app = document.getElementById("app");
 const userBox = document.getElementById("user-box");
 let session = null;
 let uid = 0; // عدّاد لتوليد معرّفات فريدة لحقول النماذج (ربط label بالحقل)
+let adminUnsub = null; // اشتراك التحديث اللحظي (للوحة الإدارة المباشرة)
+function cleanupAdmin() { if (adminUnsub) { adminUnsub(); adminUnsub = null; } }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 // ---- إقلاع -----------------------------------------------------------------
 
@@ -40,17 +43,22 @@ function renderUserBox() {
 
 function parseHash() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-  if (parts[0] === "t" && parts[1]) return { view: "tournament", id: parts[1], tab: parts[2] || "details" };
+  if (parts[0] === "t" && parts[1]) {
+    if (parts[2] === "m" && parts[3]) return { view: "live", id: parts[1], matchId: parts[3] };
+    return { view: "tournament", id: parts[1], tab: parts[2] || "details" };
+  }
   return { view: "home" };
 }
 
 async function route() {
+  cleanupAdmin();
   if (!isConfigured) return renderSetupNeeded();
   if (!session) return renderLogin();
   const r = parseHash();
   try {
     mount(app, spinner());
-    if (r.view === "tournament") await renderTournamentAdmin(r.id, r.tab);
+    if (r.view === "live") await renderLiveConsole(r.id, r.matchId);
+    else if (r.view === "tournament") await renderTournamentAdmin(r.id, r.tab);
     else await renderHome();
   } catch (e) { console.error(e); renderError(e); }
 }
@@ -246,8 +254,13 @@ function renderGroupsTab(host, state) {
     const teamList = el("div");
     if (!groupTeams.length) teamList.appendChild(el("p.page-sub", { style: "padding:6px 2px", text: "لا توجد فرق في هذا البيت" }));
     for (const tm of groupTeams) {
+      const pcount = (state.players || []).filter((p) => p.team_id === tm.id).length;
       teamList.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
-        el("div.grow", { text: tm.name }),
+        el("div.grow", {}, [
+          el("div", { style: "font-weight:700", text: tm.name }),
+          el("div.sub", { text: `${pcount} ${t.players}` }),
+        ]),
+        el("button.btn.btn-sm.btn-outline", { text: "👥 " + t.players, onclick: () => playersModal(state, tm) }),
         el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => teamForm(tournament.id, groups, tm) }),
         el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeTeam(tm) }),
       ]));
@@ -308,9 +321,78 @@ function teamForm(tid, groups, existing, defaultGroupId) {
 }
 
 async function removeTeam(tm) {
-  if (!(await confirmDialog(`حذف الفريق «${tm.name}»؟ ${t.confirmDelete}`))) return;
+  if (!(await confirmDialog(`حذف الفريق «${tm.name}» ولاعبيه؟ ${t.confirmDelete}`))) return;
   try { await api.deleteTeam(tm.id); toast(t.deleted, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// ---- إدارة لاعبي الفريق ----------------------------------------------------
+
+function playersModal(state, team) {
+  const list = el("div");
+  const render = () => {
+    const players = (state.players || []).filter((p) => p.team_id === team.id)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    clear(list);
+    if (!players.length) list.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noPlayers }));
+    for (const p of players) {
+      list.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
+        p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
+        el("div.grow", { text: p.name }),
+        el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => playerForm(state, team, p) }),
+        el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removePlayer(state, team, p) }),
+      ]));
+    }
+  };
+  render();
+  openModal({
+    title: `${t.managePlayers} — ${team.name}`,
+    body: el("div", {}, [
+      list,
+      el("button.btn.btn-primary.btn-block", { style: "margin-top:12px", text: "＋ " + t.addPlayer, onclick: () => playerForm(state, team, null) }),
+    ]),
+    onDismiss: () => route(), // نُحدّث التبويب (عدّاد اللاعبين) عند الإغلاق
+  });
+  // نُبقي النافذة مفتوحة ونعيد الرسم بعد كل تعديل عبر state المحلي
+  playersModal._refresh = render;
+}
+
+function playerForm(state, team, existing) {
+  const nextOrder = ((state.players || []).filter((p) => p.team_id === team.id)
+    .reduce((m, p) => Math.max(m, p.sort_order ?? 0), 0)) + 1;
+  formModal({
+    title: existing ? t.edit : t.addPlayer,
+    fields: [
+      { name: "name", label: t.playerName, value: existing?.name, attrs: { required: true } },
+      { name: "number", label: t.playerNumber, type: "number", value: existing?.number ?? "", attrs: { min: 0, inputmode: "numeric" } },
+    ],
+    onSubmit: async (v, close) => {
+      const name = v.name.trim();
+      if (!name) return toast("الاسم مطلوب", "err");
+      const number = v.number === "" ? null : toInt(v.number, null);
+      if (existing) {
+        await api.updatePlayer(existing.id, { name, number });
+        Object.assign(existing, { name, number });
+      } else {
+        const created = await api.createPlayer({
+          tournament_id: team.tournament_id, team_id: team.id, name, number, sort_order: nextOrder,
+        });
+        (state.players ||= []).push(created);
+      }
+      close(); toast(t.saved, "ok");
+      playersModal._refresh?.();
+    },
+  });
+}
+
+async function removePlayer(state, team, p) {
+  if (!(await confirmDialog(`حذف اللاعب «${p.name}»؟`))) return;
+  try {
+    await api.deletePlayer(p.id);
+    state.players = (state.players || []).filter((x) => x.id !== p.id);
+    toast(t.deleted, "ok");
+    playersModal._refresh?.();
+  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
 // ---- تبويب المباريات -------------------------------------------------------
@@ -345,7 +427,8 @@ function renderMatchesTab(host, state) {
           el("div", { style: "font-weight:700", text: `${home}   ${score}   ${away}` }),
           el("div.sub", { text: [grp, matchStatusLabel(m.status)].filter(Boolean).join(" · ") }),
         ]),
-        el("button.btn.btn-sm.btn-primary", { text: t.enterResult, onclick: () => resultModal(m) }),
+        el("a.btn.btn-sm.btn-accent", { href: `#/t/${tournament.id}/m/${m.id}`, text: "▶ " + t.liveManage }),
+        el("button.btn.btn-sm.btn-outline", { text: t.enterResult, onclick: () => resultModal(m) }),
         el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => matchForm(state, m) }),
         el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeMatch(m) }),
       ]));
@@ -443,6 +526,164 @@ async function generateFixtures(state) {
     toast(t.fixturesDone + ` (${rows.length})` + (skipped ? ` · تم تجاهل ${skipped} مكرّرة` : ""), "ok");
     route();
   } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// ---- الإدارة المباشرة للمباراة ---------------------------------------------
+
+async function renderLiveConsole(tid, matchId) {
+  const tournament = await api.fetchTournament(tid);
+  if (!tournament) return mount(app, emptyState("🔍", "البطولة غير موجودة"),
+    el("a.btn.btn-outline", { href: "#/", text: t.backToTournaments }));
+  let bundle = await api.fetchTournamentBundle(tid);
+  let match = bundle.matches.find((m) => m.id === matchId);
+  if (!match) return mount(app,
+    el("a.header-link", { href: `#/t/${tid}/matches`, text: "→ " + t.manageMatches, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+    emptyState("🔍", "المباراة غير موجودة"));
+
+  const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
+  let currentMinute = ""; // يُحتفظ بها بين الأحداث
+
+  const container = el("div.live-console");
+  mount(app, container);
+
+  async function reload() {
+    bundle = await api.fetchTournamentBundle(tid);
+    match = bundle.matches.find((m) => m.id === matchId) || match;
+    render();
+  }
+
+  // تحديث لحظي: لو سجّل مديرٌ آخر هدفاً تُحدَّث الشاشة تلقائياً
+  cleanupAdmin();
+  adminUnsub = api.subscribeTournament(tid, debounce(() => { reload().catch((e) => console.error(e)); }, 400));
+
+  function playersOf(teamId) {
+    return (bundle.players || []).filter((p) => p.team_id === teamId)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  }
+
+  function openPicker(type, teamId) {
+    const team = teamById.get(teamId);
+    const players = playersOf(teamId);
+    const minInput = el("input.input.minute-input", { type: "number", inputmode: "numeric", min: 0, value: currentMinute, placeholder: "'" });
+    let close;
+    const pick = async (playerId) => {
+      const minute = minInput.value === "" ? null : toInt(minInput.value, null);
+      currentMinute = minInput.value;
+      close();
+      try {
+        if (type === "goal") await api.addGoal(match, teamId, playerId, minute);
+        else await api.addCard(match, teamId, playerId, minute, type);
+        toast(t.saved, "ok");
+        await reload();
+      } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+    };
+    const grid = el("div.player-grid");
+    for (const p of players) {
+      grid.appendChild(el("button.btn.player-pick", { type: "button",
+        text: (p.number != null && p.number !== "" ? p.number + " · " : "") + p.name, onclick: () => pick(p.id) }));
+    }
+    grid.appendChild(el("button.btn.btn-outline.player-pick", { type: "button", text: t.noPlayerKnown, onclick: () => pick(null) }));
+    close = openModal({
+      title: `${eventIcon(type)} ${type === "goal" ? t.whoScored : t.whoBooked}`,
+      body: el("div", {}, [
+        el("div.lc-picker-team", { text: team ? team.name : "" }),
+        el("div.field", {}, [el("label", { text: t.minute, for: "picker-min" }), (minInput.id = "picker-min", minInput)]),
+        !players.length ? el("p.page-sub", { style: "margin:4px 0 10px", text: t.addPlayersFirst }) : null,
+        grid,
+      ]),
+    });
+  }
+
+  async function setStatus(status) {
+    try {
+      const patch = { status };
+      // عند الإنهاء: نُثبّت النتيجة (0-0 إن لم تُسجَّل أهداف) كي تُحتسب في الترتيب
+      if (status === "finished") {
+        patch.home_score = match.home_score ?? 0;
+        patch.away_score = match.away_score ?? 0;
+      }
+      await api.updateMatch(matchId, patch);
+      await reload();
+    } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+  }
+
+  async function delEvent(ev) {
+    if (!(await confirmDialog(t.deleteEventQ))) return;
+    try { await api.removeEvent(ev, match); toast(t.deleted, "ok"); await reload(); }
+    catch (e) { toast(e.message || t.errorGeneric, "err"); }
+  }
+
+  function sidePanel(teamId, side) {
+    const team = teamById.get(teamId);
+    return el("div.lc-side", {}, [
+      el("div.lc-side-name", { text: team ? team.name : "—" }),
+      el("button.btn.lc-btn.lc-goal", { type: "button", text: "⚽ " + t.goal, onclick: () => openPicker("goal", teamId) }),
+      el("div.lc-cards", {}, [
+        el("button.btn.lc-btn.lc-yellow", { type: "button", text: "🟨", title: t.yellowCard, onclick: () => openPicker("yellow", teamId) }),
+        el("button.btn.lc-btn.lc-red", { type: "button", text: "🟥", title: t.redCard, onclick: () => openPicker("red", teamId) }),
+      ]),
+    ]);
+  }
+
+  function statusControls() {
+    const btns = [];
+    if (match.status === "scheduled") btns.push(el("button.btn.btn-primary", { type: "button", text: "▶ " + t.startMatch, onclick: () => setStatus("live") }));
+    if (match.status === "scheduled" || match.status === "live") btns.push(el("button.btn.btn-accent", { type: "button", text: "⏹ " + t.finishMatch, onclick: () => setStatus("finished") }));
+    if (match.status === "finished") btns.push(el("button.btn.btn-outline", { type: "button", text: "↺ " + t.reopenMatch, onclick: () => setStatus("live") }));
+    return el("div.lc-status-controls", {}, btns);
+  }
+
+  function render() {
+    const playersById = new Map((bundle.players || []).map((p) => [p.id, p]));
+    const events = (bundle.events || []).filter((e) => e.match_id === matchId).sort(api.byEventOrder);
+    const home = teamById.get(match.home_team_id);
+    const away = teamById.get(match.away_team_id);
+    const live = match.status === "live";
+
+    const minuteRow = el("div.lc-minute-row", {}, [
+      el("label", { for: "cur-min", text: t.currentMinute }),
+      el("input.input.minute-input", { id: "cur-min", type: "number", inputmode: "numeric", min: 0, value: currentMinute,
+        oninput: (e) => { currentMinute = e.currentTarget.value; } }),
+    ]);
+
+    const timeline = el("div.lc-timeline");
+    if (!events.length) timeline.appendChild(el("p.page-sub", { style: "text-align:center;padding:10px", text: t.noEvents }));
+    for (const e of events) {
+      const p = e.player_id ? playersById.get(e.player_id) : null;
+      const tm = teamById.get(e.team_id);
+      timeline.appendChild(el("div.tl-item.tl-" + e.type, {}, [
+        el("span.tl-min", { text: e.minute != null ? e.minute + "'" : "—" }),
+        el("span.tl-ico", { text: eventIcon(e.type) }),
+        el("span.tl-txt", {}, [
+          el("span.tl-player", { text: p ? p.name : t.unknownPlayer }),
+          tm ? el("span.tl-team", { text: tm.name }) : null,
+        ]),
+        el("button.icon-btn", { text: "✕", title: t.delete, onclick: () => delEvent(e) }),
+      ]));
+    }
+
+    mount(container,
+      el("a.header-link", { href: `#/t/${tid}/matches`, text: "→ " + t.manageMatches, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+      el("div.lc-scoreboard" + (live ? ".is-live" : ""), {}, [
+        el("div.lc-team", { text: home ? home.name : "—" }),
+        el("div.lc-score", {}, [
+          String(match.home_score ?? 0), el("span.sep", { text: ":" }), String(match.away_score ?? 0),
+        ]),
+        el("div.lc-team", { text: away ? away.name : "—" }),
+        el("div.lc-status-badge", {}, [
+          live ? el("span.badge.badge-live", {}, [el("span.dot"), t.live])
+               : el("span.badge.badge-" + (match.status === "finished" ? "finished" : "upcoming"), { text: matchStatusLabel(match.status) }),
+        ]),
+      ]),
+      minuteRow,
+      el("div.lc-actions", {}, [sidePanel(match.home_team_id, "home"), sidePanel(match.away_team_id, "away")]),
+      statusControls(),
+      el("h3.lc-events-title", { text: t.events }),
+      timeline,
+    );
+  }
+
+  render();
 }
 
 // ---- نموذج عام (Modal) ------------------------------------------------------

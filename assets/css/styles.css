@@ -353,6 +353,97 @@ table.standings td.pos-diff.neg { color: var(--loss); }
 .admin-list-item .grow { flex: 1; min-width: 0; }
 .admin-list-item .grow .sub { color: var(--text-3); font-size: .82rem; }
 
+.admin-list-item .player-num {
+  display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px;
+  border-radius: 7px; background: var(--brand-050); color: var(--brand); font-weight: 800; font-size: .82rem;
+}
+
+/* ===== الخطّ الزمني للأحداث (عام + إدارة) ================================ */
+.timeline { list-style: none; margin: 0; padding: 0; }
+.tl-item {
+  display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tl-item:last-child { border-bottom: 0; }
+.tl-min { min-width: 34px; font-weight: 800; color: var(--text-2); font-variant-numeric: tabular-nums; text-align: center; }
+.tl-ico { font-size: 1.1rem; }
+.tl-txt { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.tl-player { font-weight: 700; }
+.tl-team { color: var(--text-3); font-size: .8rem; }
+.tl-item.tl-red { background: color-mix(in srgb, var(--loss) 7%, transparent); }
+
+/* ===== بطاقة مباراة قابلة للتوسّع (عام) ================================== */
+.match-wrap { margin-bottom: 10px; }
+.match-wrap .match { margin-bottom: 0; }
+.match.has-events { cursor: pointer; position: relative; }
+.match.has-events::after {
+  content: "⌄"; position: absolute; inset-inline-start: 8px; bottom: 1px;
+  color: var(--text-3); font-size: .9rem; line-height: 1; transition: transform .15s;
+}
+.match.has-events.open::after { transform: rotate(180deg); }
+.match.has-events.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.match-details {
+  border: 1px solid var(--border); border-top: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--surface-2); margin-top: -2px; overflow: hidden;
+}
+
+/* ===== لوحة الإدارة المباشرة =========================================== */
+.live-console { max-width: 640px; margin: 0 auto; }
+.lc-scoreboard {
+  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px;
+  background: linear-gradient(180deg, var(--brand-600), var(--brand-700)); color: #fff;
+  border-radius: var(--radius); padding: 20px 16px; margin: 10px 0 16px; box-shadow: var(--shadow-md);
+  position: relative;
+}
+.lc-scoreboard.is-live { box-shadow: 0 0 0 2px var(--live), var(--shadow-md); }
+.lc-team { font-weight: 800; font-size: 1.05rem; text-align: center; min-width: 0; overflow-wrap: anywhere; }
+.lc-score { font-size: 2.4rem; font-weight: 900; font-variant-numeric: tabular-nums; display: flex; gap: 8px; align-items: center; }
+.lc-score .sep { opacity: .7; }
+.lc-status-badge { position: absolute; inset-block-start: 8px; inset-inline-end: 10px; }
+
+.lc-minute-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.lc-minute-row label { font-weight: 700; color: var(--text-2); }
+.minute-input { width: 90px; text-align: center; font-weight: 800; font-size: 1.05rem; }
+
+.lc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+.lc-side {
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+  padding: 12px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-sm);
+}
+.lc-side-name { font-weight: 800; text-align: center; overflow-wrap: anywhere; }
+.lc-btn { min-height: 52px; font-size: 1.05rem; font-weight: 800; }
+.lc-goal { background: var(--brand); color: #fff; }
+.lc-goal:hover { background: var(--brand-600); filter: none; }
+.lc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lc-cards .lc-btn { min-height: 46px; font-size: 1.2rem; }
+.lc-yellow { background: #fde68a; }
+.lc-red { background: #fecaca; }
+
+.lc-status-controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.lc-status-controls .btn { flex: 1; min-height: 46px; }
+.lc-events-title { font-weight: 800; margin-bottom: 8px; }
+.lc-timeline { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
+.lc-timeline .tl-item .icon-btn { color: var(--loss); }
+
+/* منتقي اللاعبين */
+.lc-picker-team { text-align: center; font-weight: 800; color: var(--text-2); margin-bottom: 10px; }
+.player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.player-pick { min-height: 48px; justify-content: center; text-align: center; background: var(--surface-2); font-weight: 700; }
+.player-pick:hover { border-color: var(--brand); }
+
+/* ===== مناطق آمنة للآيفون (النوتش) + أهداف لمس أكبر ===================== */
+@supports (padding: env(safe-area-inset-top)) {
+  .site-header { height: auto; min-height: calc(var(--header-h) + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
+  .site-header .wrap { min-height: var(--header-h); } /* لا نعتمد على height:100% مع height:auto للأب */
+  .container { padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right)); }
+  .toast-host { inset-block-end: calc(20px + env(safe-area-inset-bottom)); }
+}
+@media (hover: none) and (pointer: coarse) {
+  .btn, .chip, .tab, .icon-btn { min-height: 44px; }
+  .icon-btn { min-width: 44px; }
+}
+
 /* الطباعة ------------------------------------------------------------------ */
 @media print {
   .site-header, .tabs, .filters, .header-link, .btn, .admin-bar, .toast-host, .site-footer { display: none !important; }
@@ -370,4 +461,9 @@ table.standings td.pos-diff.neg { color: var(--loss); }
   .row-2 { grid-template-columns: 1fr; }
   table.standings { min-width: 480px; }
   .brand { font-size: 1rem; }
+  .lc-score { font-size: 2rem; }
+  .lc-team { font-size: .95rem; }
+  .lc-scoreboard { padding: 18px 12px; gap: 6px; }
+  .admin-list-item { flex-wrap: wrap; }
+  .admin-list-item .grow { flex-basis: 100%; }
 }

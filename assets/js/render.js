@@ -16,8 +16,31 @@ export function groupByDay(matches) {
   return [...map.entries()]; // [[date, matches], ...] محافظ على ترتيب الإدخال
 }
 
-// بطاقة مباراة واحدة (للعرض)
-export function matchCard(m, teamById, groupById, { showGroup = true } = {}) {
+// أيقونة/تسمية حدث المباراة
+export function eventIcon(type) { return { goal: "⚽", yellow: "🟨", red: "🟥" }[type] || "•"; }
+export function eventTypeLabel(type) { return t["ev_" + type] || type; }
+
+// خطّ زمني للأحداث (أهداف/بطاقات) — مرتّب مسبقاً
+export function eventsTimeline(events, playersById, teamById) {
+  const list = el("ul.timeline");
+  for (const e of events) {
+    const p = e.player_id ? playersById.get(e.player_id) : null;
+    const tm = teamById.get(e.team_id);
+    list.appendChild(el("li.tl-item.tl-" + e.type, {}, [
+      el("span.tl-min", { text: e.minute != null ? e.minute + "'" : "—" }),
+      el("span.tl-ico", { text: eventIcon(e.type) }),
+      el("span.tl-txt", {}, [
+        el("span.tl-player", { text: p ? p.name : t.unknownPlayer }),
+        tm ? el("span.tl-team", { text: tm.name }) : null,
+      ]),
+    ]));
+  }
+  return list;
+}
+
+// بطاقة مباراة واحدة (للعرض) — قابلة للتوسّع لعرض الأحداث إن وُجدت
+export function matchCard(m, teamById, groupById, opts = {}) {
+  const { showGroup = true, events = [], playersById = new Map() } = opts;
   const home = teamById.get(m.home_team_id);
   const away = teamById.get(m.away_team_id);
   const homeName = home ? home.name : "—";
@@ -46,16 +69,36 @@ export function matchCard(m, teamById, groupById, { showGroup = true } = {}) {
     live ? el("span.grp", {}, [el("span.badge.badge-live", {}, [el("span.dot"), t.live])]) : null,
   ]);
 
-  return el("div.match" + (live ? ".is-live" : ""), {}, [
+  const hasEvents = events.length > 0;
+  const matchEl = el("div.match" + (live ? ".is-live" : "") + (hasEvents ? ".has-events" : ""), {}, [
     timeCol,
     el("div.team.home" + (homeWin ? ".winner" : ""), {}, [el("span.name", { title: homeName, text: homeName })]),
     scoreEl,
     el("div.team.away" + (awayWin ? ".winner" : ""), {}, [el("span.name", { title: awayName, text: awayName })]),
   ]);
+
+  if (!hasEvents) return matchEl;
+
+  const details = el("div.match-details", { hidden: true }, [eventsTimeline(events, playersById, teamById)]);
+  matchEl.setAttribute("role", "button");
+  matchEl.setAttribute("tabindex", "0");
+  matchEl.setAttribute("aria-expanded", "false");
+  const toggle = () => {
+    const open = details.hidden;
+    details.hidden = !open;
+    matchEl.classList.toggle("open", open);
+    matchEl.setAttribute("aria-expanded", String(open));
+  };
+  matchEl.addEventListener("click", toggle);
+  matchEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
+  });
+  return el("div.match-wrap", {}, [matchEl, details]);
 }
 
 // عرض البرنامج مجمّعاً بالأيام
-export function renderScheduleDays(matches, teamById, groupById) {
+export function renderScheduleDays(matches, teamById, groupById, extra = {}) {
+  const { eventsByMatch, playersById } = extra;
   if (!matches.length) {
     return el("div.empty", {}, [el("div.icon", { text: "📅" }), el("div", { text: t.noMatches })]);
   }
@@ -67,7 +110,12 @@ export function renderScheduleDays(matches, teamById, groupById) {
       el("span.line"),
     ]);
     const wrap = el("div.day-group", {}, [head]);
-    for (const m of dayMatches) wrap.appendChild(matchCard(m, teamById, groupById));
+    for (const m of dayMatches) {
+      wrap.appendChild(matchCard(m, teamById, groupById, {
+        events: eventsByMatch ? (eventsByMatch.get(m.id) || []) : [],
+        playersById: playersById || new Map(),
+      }));
+    }
     frag.appendChild(wrap);
   }
   return frag;

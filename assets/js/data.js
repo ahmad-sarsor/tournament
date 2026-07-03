@@ -52,16 +52,28 @@ export async function fetchTournament(id) {
 
 export async function fetchTournamentBundle(tid) {
   const d = requireDb();
-  const [g, tm, mt] = await Promise.all([
+  const [g, tm, mt, pl, ev] = await Promise.all([
     getDocs(query(collection(d, "groups"), where("tournament_id", "==", tid))),
     getDocs(query(collection(d, "teams"), where("tournament_id", "==", tid))),
     getDocs(query(collection(d, "matches"), where("tournament_id", "==", tid))),
+    getDocs(query(collection(d, "players"), where("tournament_id", "==", tid))),
+    getDocs(query(collection(d, "events"), where("tournament_id", "==", tid))),
   ]);
   return {
     groups: mapDocs(g).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     teams: mapDocs(tm).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     matches: mapDocs(mt).sort(byMatchOrder),
+    players: mapDocs(pl).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
+    events: mapDocs(ev).sort(byEventOrder),
   };
+}
+
+// ترتيب الأحداث: حسب الدقيقة ثم وقت الإنشاء (بدون دقيقة => في الآخر)
+export function byEventOrder(a, b) {
+  const ma = a.minute == null ? 1e9 : a.minute;
+  const mb = b.minute == null ? 1e9 : b.minute;
+  if (ma !== mb) return ma - mb;
+  return (a.created_at ?? 0) - (b.created_at ?? 0);
 }
 
 // ---- حساب الترتيب (دوال صرفة) ---------------------------------------------
@@ -71,7 +83,8 @@ export function isCounted(m) {
 }
 
 export function computeGroupStandings(teams, matches, points) {
-  const P = { win: 3, draw: 1, loss: 0, ...(points || {}) };
+  const P = { win: 3, draw: 1, loss: 0 };
+  if (points) for (const k of ["win", "draw", "loss"]) if (points[k] != null) P[k] = points[k];
   const rows = new Map();
   for (const tm of teams) {
     rows.set(tm.id, { team: tm, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0 });
@@ -199,6 +212,8 @@ export async function updateTournament(id, patch) {
   return { id, ...patch };
 }
 export async function deleteTournament(id) {
+  await deleteWhere("events", "tournament_id", id);
+  await deleteWhere("players", "tournament_id", id);
   await deleteWhere("matches", "tournament_id", id);
   await deleteWhere("teams", "tournament_id", id);
   await deleteWhere("groups", "tournament_id", id);
@@ -227,9 +242,24 @@ export async function updateTeam(id, patch) {
   await updateDoc(doc(requireDb(), "teams", id), clean(patch));
   return { id, ...patch };
 }
+// عند حذف فريق: نُفرِغ مبارياته (نُلغي الطرف، ونمسح النتيجة والأحداث ونعيدها لمجدولة)
+async function resetMatchesForDeletedTeam(teamId) {
+  const d = requireDb();
+  const affected = new Map();
+  for (const side of ["home_team_id", "away_team_id"]) {
+    const snap = await getDocs(query(collection(d, "matches"), where(side, "==", teamId)));
+    for (const s of snap.docs) affected.set(s.id, { ref: s.ref, side });
+  }
+  for (const { ref, side } of affected.values()) {
+    await deleteWhere("events", "match_id", ref.id);
+    await updateDoc(ref, { [side]: null, home_score: null, away_score: null, status: "scheduled" });
+  }
+}
+
 export async function deleteTeam(id) {
-  await nullifyWhere("matches", "home_team_id", id);
-  await nullifyWhere("matches", "away_team_id", id);
+  await deleteWhere("players", "team_id", id);
+  await resetMatchesForDeletedTeam(id);
+  await deleteWhere("events", "team_id", id); // احتياط لأي أحداث متبقّية
   await deleteDoc(doc(requireDb(), "teams", id));
 }
 
@@ -242,7 +272,63 @@ export async function updateMatch(id, patch) {
   return { id, ...patch };
 }
 export async function deleteMatch(id) {
+  await deleteWhere("events", "match_id", id);
   await deleteDoc(doc(requireDb(), "matches", id));
+}
+
+// ---- اللاعبون -------------------------------------------------------------
+
+export async function createPlayer(p) {
+  const ref = await addDoc(collection(requireDb(), "players"), clean(p));
+  return { id: ref.id, ...p };
+}
+export async function updatePlayer(id, patch) {
+  await updateDoc(doc(requireDb(), "players", id), clean(patch));
+  return { id, ...patch };
+}
+export async function deletePlayer(id) {
+  await nullifyWhere("events", "player_id", id); // نُبقي الأحداث لكن بلاعب غير محدَّد
+  await deleteDoc(doc(requireDb(), "players", id));
+}
+
+// ---- أحداث المباراة (أهداف/إنذارات) + مزامنة النتيجة ------------------------
+
+async function createEvent(payload) {
+  const ref = await addDoc(collection(requireDb(), "events"), clean({ ...payload, created_at: Date.now() }));
+  return { id: ref.id, ...payload };
+}
+
+// تسجيل هدف: ينشئ حدثاً ويزيد نتيجة الفريق المناسب، ويبدأ المباراة إن كانت مجدولة
+export async function addGoal(match, teamId, playerId, minute) {
+  const isHome = match.home_team_id === teamId;
+  const home = match.home_score ?? 0;
+  const away = match.away_score ?? 0;
+  // نُهيّئ الطرفين كأرقام ونزيد الطرف المسجِّل
+  const patch = isHome ? { home_score: home + 1, away_score: away } : { home_score: home, away_score: away + 1 };
+  if (match.status === "scheduled") patch.status = "live";
+  await updateMatch(match.id, patch);
+  return createEvent({
+    tournament_id: match.tournament_id, match_id: match.id,
+    team_id: teamId, player_id: playerId || null, type: "goal", minute: minute ?? null,
+  });
+}
+
+// إنذار/طرد: حدث فقط (لا يؤثّر على النتيجة)
+export async function addCard(match, teamId, playerId, minute, type) {
+  return createEvent({
+    tournament_id: match.tournament_id, match_id: match.id,
+    team_id: teamId, player_id: playerId || null, type, minute: minute ?? null,
+  });
+}
+
+// حذف حدث؛ لو كان هدفاً نُنقص النتيجة
+export async function removeEvent(event, match) {
+  if (event.type === "goal" && match) {
+    const isHome = match.home_team_id === event.team_id;
+    const cur = (isHome ? match.home_score : match.away_score) ?? 0;
+    await updateMatch(match.id, { [isHome ? "home_score" : "away_score"]: Math.max(0, cur - 1) });
+  }
+  await deleteDoc(doc(requireDb(), "events", event.id));
 }
 
 export async function insertMatches(rows) {
@@ -347,7 +433,7 @@ export function subscribeTournament(tid, onChange) {
     (err) => console.error(err)
   );
   const unsubs = [
-    mk("matches"), mk("teams"), mk("groups"),
+    mk("matches"), mk("teams"), mk("groups"), mk("players"), mk("events"),
     // تغييرات على البطولة نفسها (النقاط/المتأهّلون/الحالة/الاسم)
     onSnapshot(doc(db, "tournaments", tid), skipFirst(() => onChange()), (err) => console.error(err)),
   ];

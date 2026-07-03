@@ -174,6 +174,12 @@ function renderSchedule(state) {
   const { bundle } = state;
   const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
   const groupById = new Map(bundle.groups.map((x) => [x.id, x]));
+  const playersById = new Map((bundle.players || []).map((x) => [x.id, x]));
+  const eventsByMatch = new Map();
+  for (const e of bundle.events || []) {
+    if (!eventsByMatch.has(e.match_id)) eventsByMatch.set(e.match_id, []);
+    eventsByMatch.get(e.match_id).push(e);
+  }
   const wrap = el("div");
 
   // مرشّحات البيوت
@@ -184,7 +190,7 @@ function renderSchedule(state) {
     const matches = activeGroup === "all"
       ? bundle.matches
       : bundle.matches.filter((m) => m.group_id === activeGroup);
-    mount(listHost, renderScheduleDays(matches, teamById, groupById));
+    mount(listHost, renderScheduleDays(matches, teamById, groupById, { eventsByMatch, playersById }));
   };
   const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
     text: label,
@@ -204,7 +210,7 @@ function renderSchedule(state) {
 
 function renderStandings(state) {
   const { bundle, tournament } = state;
-  const points = { win: tournament.win_points, draw: tournament.draw_points, loss: tournament.loss_points };
+  const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
   const wrap = el("div", {}, [
     el("div.alert.alert-info", { text: t.standingsNote }),
   ]);
