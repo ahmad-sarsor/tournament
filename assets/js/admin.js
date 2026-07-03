@@ -325,36 +325,29 @@ async function removeTeam(tm) {
 
 function playersModal(state, team) {
   const list = el("div");
-  const roleLabel = { player: t.squadPlayers, coach: t.squadCoach, management: t.squadManagement };
   const render = () => {
     const members = (state.players || []).filter((p) => p.team_id === team.id)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     clear(list);
     if (!members.length) { list.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noPlayers })); return; }
-    for (const role of ["player", "coach", "management"]) {
-      const arr = members.filter((p) => (p.role || "player") === role);
-      if (!arr.length) continue;
-      list.appendChild(el("div.lu-label", { style: "margin:12px 2px 4px", text: roleLabel[role] }));
-      for (const p of arr) {
-        list.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
-          role === "player" && p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
-          el("div.grow", { text: p.name }),
-          el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => playerForm(state, team, p) }),
-          el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removePlayer(state, team, p) }),
-        ]));
-      }
+    for (const p of members) {
+      list.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
+        p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
+        el("div.grow", { text: p.name }),
+        el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => playerForm(state, team, p) }),
+        el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removePlayer(state, team, p) }),
+      ]));
     }
   };
   render();
   openModal({
-    title: `${t.manageSquad} — ${team.name}`,
+    title: `${t.managePlayers} — ${team.name}`,
     body: el("div", {}, [
       list,
-      el("button.btn.btn-primary.btn-block", { style: "margin-top:14px", text: "＋ " + t.addMember, onclick: () => playerForm(state, team, null) }),
+      el("button.btn.btn-primary.btn-block", { style: "margin-top:14px", text: "＋ " + t.addPlayer, onclick: () => playerForm(state, team, null) }),
     ]),
-    onDismiss: () => route(), // نُحدّث التبويب (عدّاد الأعضاء) عند الإغلاق
+    onDismiss: () => route(), // نُحدّث التبويب (عدّاد اللاعبين) عند الإغلاق
   });
-  // نُبقي النافذة مفتوحة ونعيد الرسم بعد كل تعديل عبر state المحلي
   playersModal._refresh = render;
 }
 
@@ -362,28 +355,21 @@ function playerForm(state, team, existing) {
   const nextOrder = ((state.players || []).filter((p) => p.team_id === team.id)
     .reduce((m, p) => Math.max(m, p.sort_order ?? 0), 0)) + 1;
   formModal({
-    title: existing ? t.edit : t.addMember,
+    title: existing ? t.edit : t.addPlayer,
     fields: [
       { name: "name", label: t.playerName, value: existing?.name, attrs: { required: true } },
-      { name: "role", label: t.memberRole, type: "select", value: existing?.role || "player",
-        options: [
-          { value: "player", label: t.role_player },
-          { value: "coach", label: t.role_coach },
-          { value: "management", label: t.role_management },
-        ] },
-      { name: "number", label: t.playerNumber + " (للاعبين)", type: "number", value: existing?.number ?? "", attrs: { min: 0, inputmode: "numeric" } },
+      { name: "number", label: t.playerNumber, type: "number", value: existing?.number ?? "", attrs: { min: 0, inputmode: "numeric" } },
     ],
     onSubmit: async (v, close) => {
       const name = v.name.trim();
       if (!name) return toast("الاسم مطلوب", "err");
-      const role = v.role || "player";
       const number = v.number === "" ? null : toInt(v.number, null);
       if (existing) {
-        await api.updatePlayer(existing.id, { name, number, role });
-        Object.assign(existing, { name, number, role });
+        await api.updatePlayer(existing.id, { name, number });
+        Object.assign(existing, { name, number });
       } else {
         const created = await api.createPlayer({
-          tournament_id: team.tournament_id, team_id: team.id, name, number, role, sort_order: nextOrder,
+          tournament_id: team.tournament_id, team_id: team.id, name, number, sort_order: nextOrder,
         });
         (state.players ||= []).push(created);
       }

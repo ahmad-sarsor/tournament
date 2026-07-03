@@ -67,7 +67,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 html {
   -webkit-text-size-adjust: 100%;
-  font-size: calc(16px * var(--font-scale, 1)); /* حجم الخطّ قابل للتعديل من الإعدادات */
+  font-size: calc(16px * var(--font-scale, 0.9)); /* التلقائي صغير؛ يُعدَّل من الإعدادات */
   scroll-behavior: smooth;
 }
 body {
@@ -230,33 +230,50 @@ img { max-width: 100%; }
 .lu-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-weight: 600; font-size: .92rem; }
 .lu-row .player-num { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 6px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: .78rem; }
 
-/* ===== الترتيب (الجداول) ================================================= */
-.standings-block { margin-bottom: 26px; }
-.standings-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; font-weight: 700; font-size: 1.05rem; color: var(--ink); }
-.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-xs); background: var(--surface); }
+/* ===== الترتيب (تصميم أنيق) ============================================= */
+.standings-block { margin-bottom: 24px; }
+.standings-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; font-weight: 800; font-size: 1.02rem; color: var(--ink); }
+.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--surface); }
 table.standings { width: 100%; border-collapse: collapse; }
-/* الأعمدة الإضافية مخفيّة افتراضياً (عرض مضغوط للهاتف)، وتظهر بالزر */
 table.standings .col-extra { display: none; }
 .standings-wrap.show-all table.standings .col-extra { display: table-cell; }
-.standings-wrap.show-all .table-wrap { overflow-x: auto; }
-.standings-wrap.show-all table.standings { min-width: 620px; }
+.standings-wrap.show-all table.standings { min-width: 640px; }
+
 table.standings thead th {
-  background: var(--surface-2); color: var(--text-3); font-size: .72rem; font-weight: 700; letter-spacing: .02em;
-  text-align: center; padding: 11px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; text-transform: uppercase;
+  background: var(--surface-2); color: var(--text-3); font-size: .72rem; font-weight: 700;
+  text-align: center; padding: 12px 5px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
 table.standings th.team-col, table.standings td.team-col { text-align: start; }
-table.standings tbody td { padding: 10px 8px; text-align: center; font-variant-numeric: tabular-nums; border-bottom: 1px solid var(--border); font-weight: 600; font-size: .9rem; color: var(--text-2); }
+table.standings th.team-col, table.standings td.team-col { padding-inline-start: 14px; }
+table.standings tbody td {
+  padding: 13px 5px; text-align: center; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border); font-weight: 600; font-size: .9rem; color: var(--text-2);
+}
 table.standings tbody tr:last-child td { border-bottom: 0; }
-table.standings tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 55%, transparent); }
-table.standings .rank { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: var(--surface-2); font-size: .8rem; font-weight: 700; color: var(--text-2); }
-table.standings tr.qualify td.team-col { box-shadow: inset 3px 0 0 var(--brand); }
-table.standings tr.qualify .rank { background: var(--brand); color: #fff; }
-table.standings tr.champion .rank { background: var(--gold); color: #4a2f00; }
-table.standings .pts { font-weight: 800; color: var(--ink); font-size: .98rem; }
-table.standings td.team-col { max-width: 40vw; }
-table.standings .team-name { font-weight: 700; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; }
+
+/* الرتبة كدائرة */
+table.standings .rank {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--surface-2); font-size: .82rem; font-weight: 800; color: var(--text-2);
+}
+table.standings td.team-col { max-width: 42vw; }
+table.standings .team-name { font-weight: 800; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; font-size: .95rem; }
+
+/* النقاط مُبرَزة كرقاقة */
+table.standings .pts { display: inline-grid; place-items: center; min-width: 30px; height: 28px; padding: 0 8px; border-radius: 8px; background: var(--brand-soft); color: var(--brand-strong); font-weight: 800; font-size: .98rem; }
+
 table.standings td.pos-diff.pos { color: var(--win); }
 table.standings td.pos-diff.neg { color: var(--loss); }
+
+/* منطقة التأهّل + المتصدّر */
+table.standings tr.qualify td { background: color-mix(in srgb, var(--brand) 5%, transparent); }
+table.standings tr.qualify td.team-col { box-shadow: inset 3px 0 0 var(--brand); }
+table.standings tr.qualify .rank { background: var(--brand); color: #fff; box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--brand) 55%, transparent); }
+table.standings tr.champion td { background: color-mix(in srgb, var(--gold) 9%, transparent); }
+table.standings tr.champion td.team-col { box-shadow: inset 3px 0 0 var(--gold); }
+table.standings tr.champion .rank { background: var(--gold); color: #4a2f00; box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--gold) 55%, transparent); }
+table.standings tr.champion .pts { background: color-mix(in srgb, var(--gold) 20%, transparent); color: #8a5a00; }
+table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 7%, transparent); }
 
 /* دليل الأداء (آخر النتائج) */
 .form-guide { display: inline-flex; gap: 4px; justify-content: center; }

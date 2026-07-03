@@ -8,7 +8,9 @@ import { t } from "./i18n.js";
 const KEY_THEME = "tp_theme";     // auto | light | dark
 const KEY_FONT = "tp_fontscale";  // 0.9 | 1 | 1.12 | 1.25
 
+const DEFAULT_FONT = "0.9"; // التلقائي: صغير
 const FONT_STEPS = [
+  { v: "0.8", label: t.fontXSmall },
   { v: "0.9", label: t.fontSmall },
   { v: "1", label: t.fontNormal },
   { v: "1.12", label: t.fontLarge },
@@ -16,7 +18,7 @@ const FONT_STEPS = [
 ];
 
 export function getTheme() { try { return localStorage.getItem(KEY_THEME) || "auto"; } catch { return "auto"; } }
-export function getFont() { try { return localStorage.getItem(KEY_FONT) || "1"; } catch { return "1"; } }
+export function getFont() { try { return localStorage.getItem(KEY_FONT) || DEFAULT_FONT; } catch { return DEFAULT_FONT; } }
 
 export function applyPrefs() {
   const theme = getTheme();

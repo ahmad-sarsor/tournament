@@ -148,7 +148,7 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
       el("td.col-extra", { text: String(r.gf) }),
       el("td.col-extra", { text: String(r.ga) }),
       el("td.pos-diff.col-extra" + gdClass, { text: (r.gd > 0 ? "+" : "") + r.gd }),
-      el("td.pts", { text: String(r.points) }),
+      el("td", {}, [el("span.pts", { text: String(r.points) })]),
       el("td.col-extra", {}, [formGuide(teamForm(r.team.id, matches))]),
     ]));
   }

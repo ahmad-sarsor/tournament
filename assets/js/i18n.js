@@ -58,6 +58,7 @@ export const t = {
   themeLight: "فاتح",
   themeDark: "داكن",
   fontSize: "حجم الخطّ",
+  fontXSmall: "أصغر",
   fontSmall: "صغير",
   fontNormal: "متوسط",
   fontLarge: "كبير",

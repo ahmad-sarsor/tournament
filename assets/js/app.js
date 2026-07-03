@@ -304,26 +304,6 @@ async function renderMatchDetail(id, matchId) {
       match.match_time ? formatTime(match.match_time) : null,
     ].filter(Boolean);
 
-    const lineupCol = (team) => {
-      const members = (bundle.players || []).filter((p) => team && p.team_id === team.id)
-        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-      const ofRole = (r) => members.filter((p) => (p.role || "player") === r);
-      const section = (label, arr, showNum) => arr.length ? el("div.lu-group", {}, [
-        el("div.lu-label", { text: label }),
-        ...arr.map((p) => el("div.lu-row", {}, [
-          showNum && p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
-          el("span", { text: p.name }),
-        ])),
-      ]) : null;
-      return el("div.lu-card", {}, [
-        el("div.lu-team", { text: team ? team.name : "—" }),
-        section(t.squadPlayers, ofRole("player"), true),
-        section(t.squadCoach, ofRole("coach"), false),
-        section(t.squadManagement, ofRole("management"), false),
-        !members.length ? el("p.page-sub", { style: "padding:4px 2px", text: t.noLineup }) : null,
-      ]);
-    };
-
     mount(host,
       el("div.mp-scoreboard" + (live ? ".is-live" : ""), {}, [
         el("div.mp-team", {}, [el("span.mp-team-name", { text: home ? home.name : "—" })]),
@@ -339,10 +319,6 @@ async function renderMatchDetail(id, matchId) {
         el("h3.mp-title", { text: t.events }),
         events.length ? el("div.card", {}, [eventsTimeline(events, playersById, teamById)])
                       : el("p.page-sub", { style: "padding:6px 2px", text: t.noEvents }),
-      ]),
-      el("div.mp-section", {}, [
-        el("h3.mp-title", { text: t.lineups }),
-        el("div.mp-lineups", {}, [lineupCol(home), lineupCol(away)]),
       ]),
     );
   };
