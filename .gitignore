@@ -1,0 +1,14 @@
+# نظام التشغيل / المحرّرات
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# ملفّات مؤقتة
+*.tmp
+~$*
+
+# ملفّات محليّة لا تُنشر
+.claude/
+tournament.xlsx

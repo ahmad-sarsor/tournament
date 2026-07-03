@@ -1,0 +1,36 @@
+rules_version = '2';
+
+// ============================================================================
+//  قواعد أمان Firestore
+//  القراءة متاحة للجميع (عرض عام). الكتابة متاحة فقط لحساب/حسابات المدير.
+//
+//  ⚠️ مهم جداً: ضع بريد المدير في القائمة أدناه (نفس البريد الذي أنشأته في
+//  Firebase Authentication). بدون ذلك لن يستطيع أحد التعديل — وبِقيمة خاطئة
+//  قد يتمكّن أي مستخدم مسجَّل من التعديل. لا تكتفِ بـ (request.auth != null).
+//
+//  انسخ هذا الملف إلى: Firebase Console → Firestore Database → Rules → Publish
+// ============================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ✍️ عدّل هذه القائمة: ضع بريد/بُرد المديرين (بفاصلة بينها)
+    function adminEmails() {
+      return ['admin@example.com'];
+    }
+
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email in adminEmails();
+    }
+
+    match /tournaments/{id} { allow read: if true; allow write: if isAdmin(); }
+    match /groups/{id}      { allow read: if true; allow write: if isAdmin(); }
+    match /teams/{id}       { allow read: if true; allow write: if isAdmin(); }
+    match /matches/{id}     { allow read: if true; allow write: if isAdmin(); }
+
+    // أي مجموعة أخرى: ممنوعة افتراضياً
+    match /{document=**} { allow read, write: if false; }
+  }
+}

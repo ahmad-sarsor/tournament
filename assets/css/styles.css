@@ -1,0 +1,373 @@
+/* ==========================================================================
+   منصّة إدارة البطولات — نظام التصميم
+   Tournament Platform — Design system (RTL, Arabic, responsive, dark-mode)
+   ========================================================================== */
+
+:root {
+  /* الألوان الأساسية */
+  --brand:        #0f7a53;
+  --brand-600:    #0c6846;
+  --brand-700:    #0a5638;
+  --brand-050:    #e7f4ee;
+  --accent:       #e0a100;   /* ذهبي — للأبطال والتأهّل */
+  --accent-050:   #fbf3dc;
+
+  --win:          #16a34a;
+  --draw:         #6b7280;
+  --loss:         #dc2626;
+  --live:         #dc2626;
+
+  /* المحايدات */
+  --bg:           #f4f6f8;
+  --surface:      #ffffff;
+  --surface-2:    #f9fafb;
+  --border:       #e5e7eb;
+  --border-2:     #d1d5db;
+  --text:         #111827;
+  --text-2:       #4b5563;
+  --text-3:       #9ca3af;
+
+  --shadow-sm:    0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  --shadow-md:    0 4px 12px rgba(16,24,40,.08);
+  --shadow-lg:    0 12px 32px rgba(16,24,40,.14);
+
+  --radius:       14px;
+  --radius-sm:    10px;
+  --radius-lg:    20px;
+
+  --header-h:     64px;
+  --maxw:         1080px;
+
+  --font: "Cairo", "Tajawal", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --surface-2: #1c2230;
+    --border:    #2a313c;
+    --border-2:  #3a424f;
+    --text:      #e6edf3;
+    --text-2:    #9fb0c0;
+    --text-3:    #6b7684;
+    --brand-050: #10251c;
+    --accent-050:#2a2410;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+    --shadow-md: 0 4px 12px rgba(0,0,0,.45);
+    --shadow-lg: 0 12px 32px rgba(0,0,0,.55);
+  }
+  /* تباين مقروء على الخلفيات الداكنة (WCAG AA) */
+  .alert-info    { color: #7fd3ac; }
+  .alert-warn    { color: #e6c565; }
+  .badge-active  { color: #4fd39a; }
+  .badge-finished{ color: #e6c565; }
+  .btn-accent    { color: #241d00; }
+}
+
+/* مخفي بصرياً، مقروء للقارئات الشاشية */
+.sr-only {
+  position: absolute !important; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0);
+  white-space: nowrap; border: 0;
+}
+
+/* إعادة ضبط ---------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.55;
+  font-size: 16px;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+h1,h2,h3,h4,p { margin: 0; }
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+
+/* الرأس -------------------------------------------------------------------- */
+.site-header {
+  position: sticky; top: 0; z-index: 40;
+  height: var(--header-h);
+  background: linear-gradient(180deg, var(--brand-600), var(--brand-700));
+  color: #fff;
+  box-shadow: var(--shadow-md);
+}
+.site-header .wrap {
+  max-width: var(--maxw); margin: 0 auto; height: 100%;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 16px;
+}
+.brand {
+  display: flex; align-items: center; gap: 10px;
+  font-weight: 800; font-size: 1.15rem; letter-spacing: -.01em;
+  color: #fff;
+}
+.brand .logo {
+  width: 34px; height: 34px; border-radius: 9px;
+  background: rgba(255,255,255,.16);
+  display: grid; place-items: center; font-size: 1.1rem;
+}
+.header-spacer { flex: 1; }
+.header-link {
+  color: #fff; font-weight: 700; font-size: .9rem;
+  padding: 8px 14px; border-radius: 999px;
+  background: rgba(255,255,255,.14);
+  transition: background .15s;
+}
+.header-link:hover { background: rgba(255,255,255,.26); }
+
+/* التخطيط ------------------------------------------------------------------ */
+.container { max-width: var(--maxw); margin: 0 auto; padding: 20px 16px 64px; }
+
+.page-head { margin: 8px 0 20px; }
+.page-title { font-size: 1.6rem; font-weight: 800; letter-spacing: -.02em; }
+.page-sub { color: var(--text-2); margin-top: 4px; font-size: .95rem; }
+
+/* شريط التنقّل الفرعي (تبويبات) -------------------------------------------- */
+.tabs {
+  display: flex; gap: 6px; margin: 6px 0 22px;
+  background: var(--surface); padding: 6px; border-radius: 999px;
+  box-shadow: var(--shadow-sm); border: 1px solid var(--border);
+  width: fit-content; max-width: 100%; overflow-x: auto;
+}
+.tab {
+  padding: 9px 20px; border-radius: 999px; border: 0; cursor: pointer;
+  background: transparent; color: var(--text-2); font-weight: 700; font-size: .95rem;
+  white-space: nowrap; transition: .15s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--brand); color: #fff; box-shadow: var(--shadow-sm); }
+
+/* البطاقات ----------------------------------------------------------------- */
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.card-pad { padding: 18px; }
+
+.grid { display: grid; gap: 16px; }
+.grid.cols { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+
+/* بطاقة بطولة (الصفحة الرئيسية) -------------------------------------------- */
+.t-card {
+  display: block; padding: 20px; border-radius: var(--radius);
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm); transition: transform .12s, box-shadow .12s;
+  position: relative; overflow: hidden;
+}
+.t-card::before {
+  content: ""; position: absolute; inset-inline-start: 0; top: 0; bottom: 0;
+  width: 5px; background: var(--brand);
+}
+.t-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.t-card h3 { font-size: 1.2rem; font-weight: 800; }
+.t-card .meta { color: var(--text-2); font-size: .9rem; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+
+/* شارات الحالة ------------------------------------------------------------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px; font-size: .78rem; font-weight: 800;
+  border: 1px solid transparent; white-space: nowrap;
+}
+.badge-upcoming { background: var(--surface-2); color: var(--text-2); border-color: var(--border); }
+.badge-active   { background: var(--brand-050); color: var(--brand); border-color: color-mix(in srgb, var(--brand) 30%, transparent); }
+.badge-finished { background: var(--accent-050); color: #9a6f00; border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.badge-live {
+  background: var(--live); color: #fff;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+/* ===== البرنامج (المباريات) ============================================== */
+.day-group { margin-bottom: 26px; }
+.day-head {
+  display: flex; align-items: center; gap: 10px; margin: 0 4px 12px;
+  font-weight: 800; font-size: 1.05rem;
+}
+.day-head .date { color: var(--text-3); font-weight: 700; font-size: .85rem; }
+.day-head .line { flex: 1; height: 1px; background: var(--border); }
+
+.match {
+  display: grid;
+  grid-template-columns: 64px 1fr auto 1fr;
+  align-items: center; gap: 10px;
+  padding: 14px 16px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-sm);
+}
+.match.is-live { border-color: color-mix(in srgb, var(--live) 55%, var(--border)); }
+.match .time {
+  font-weight: 800; font-variant-numeric: tabular-nums;
+  color: var(--text); font-size: .95rem; text-align: center;
+  border-inline-end: 1px solid var(--border); padding-inline-end: 10px;
+}
+.match .time .grp { display: block; font-size: .68rem; color: var(--text-3); font-weight: 700; margin-top: 2px; }
+.match .team { display: flex; align-items: center; gap: 8px; font-weight: 700; min-width: 0; }
+.match .team.home { justify-content: flex-end; text-align: end; }
+.match .team.away { justify-content: flex-start; text-align: start; }
+.match .team .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.match .team.winner .name { color: var(--brand); }
+.match .score {
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  font-weight: 900; font-size: 1.25rem; font-variant-numeric: tabular-nums;
+  min-width: 74px; padding: 4px 10px; border-radius: 10px; background: var(--surface-2);
+}
+.match .score .sep { color: var(--text-3); font-weight: 700; }
+.match .score.pending { font-size: .8rem; font-weight: 800; color: var(--text-3); }
+
+/* ===== الترتيب (الجداول) ================================================= */
+.standings-block { margin-bottom: 26px; }
+.standings-title {
+  display: flex; align-items: center; gap: 8px; margin: 0 2px 10px;
+  font-weight: 800; font-size: 1.1rem;
+}
+.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+table.standings { width: 100%; border-collapse: collapse; background: var(--surface); min-width: 560px; }
+table.standings thead th {
+  background: var(--surface-2); color: var(--text-2);
+  font-size: .78rem; font-weight: 800; text-align: center;
+  padding: 11px 8px; border-bottom: 1px solid var(--border); white-space: nowrap;
+}
+table.standings th.team-col, table.standings td.team-col { text-align: start; }
+table.standings tbody td {
+  padding: 11px 8px; text-align: center; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border); font-weight: 700; font-size: .92rem;
+}
+table.standings tbody tr:last-child td { border-bottom: 0; }
+table.standings .rank {
+  display: inline-grid; place-items: center; width: 24px; height: 24px;
+  border-radius: 7px; background: var(--surface-2); font-size: .8rem; color: var(--text-2);
+}
+table.standings tr.qualify { background: color-mix(in srgb, var(--brand-050) 60%, transparent); }
+table.standings tr.qualify .rank { background: var(--brand); color: #fff; }
+table.standings tr.qualify td.team-col { box-shadow: inset 3px 0 0 var(--brand); }
+table.standings .pts { font-weight: 900; color: var(--text); }
+table.standings .team-name { font-weight: 800; }
+table.standings td.pos-diff.pos { color: var(--win); }
+table.standings td.pos-diff.neg { color: var(--loss); }
+
+.legend { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 10px 2px 0; font-size: .82rem; color: var(--text-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .swatch { width: 12px; height: 12px; border-radius: 4px; background: var(--brand); }
+
+/* الأدوات ------------------------------------------------------------------ */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.chip {
+  padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-2); font-weight: 700; font-size: .85rem;
+  cursor: pointer; transition: .15s;
+}
+.chip:hover { border-color: var(--border-2); }
+.chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+
+/* الأزرار ------------------------------------------------------------------ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 10px 18px; border-radius: var(--radius-sm); border: 1px solid transparent;
+  font-weight: 800; font-size: .92rem; cursor: pointer; transition: .15s;
+  background: var(--surface-2); color: var(--text);
+}
+.btn:hover { filter: brightness(.98); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: var(--brand); color: #fff; }
+.btn-primary:hover { background: var(--brand-600); filter: none; }
+.btn-accent { background: var(--accent); color: #3a2c00; }
+.btn-outline { background: transparent; border-color: var(--border-2); color: var(--text); }
+.btn-danger { background: transparent; color: var(--loss); border-color: color-mix(in srgb, var(--loss) 40%, transparent); }
+.btn-danger:hover { background: color-mix(in srgb, var(--loss) 10%, transparent); }
+.btn-sm { padding: 6px 12px; font-size: .82rem; }
+.btn-block { width: 100%; }
+
+/* النماذج ------------------------------------------------------------------ */
+.field { margin-bottom: 14px; }
+.field label { display: block; font-weight: 700; font-size: .88rem; margin-bottom: 6px; color: var(--text-2); }
+.input, .select, textarea.input {
+  width: 100%; padding: 10px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+  font-family: inherit; font-size: .95rem;
+}
+.input:focus, .select:focus { outline: 2px solid color-mix(in srgb, var(--brand) 45%, transparent); outline-offset: 1px; border-color: var(--brand); }
+.row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.score-input { width: 58px; text-align: center; font-weight: 900; font-size: 1.1rem; }
+
+/* التنبيهات ---------------------------------------------------------------- */
+.alert { padding: 14px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border); margin-bottom: 16px; font-size: .92rem; }
+.alert-info    { background: var(--brand-050); border-color: color-mix(in srgb, var(--brand) 30%, transparent); color: var(--brand-700); }
+.alert-warn    { background: var(--accent-050); border-color: color-mix(in srgb, var(--accent) 35%, transparent); color: #8a6300; }
+.alert-error   { background: color-mix(in srgb, var(--loss) 8%, var(--surface)); border-color: color-mix(in srgb, var(--loss) 35%, transparent); color: var(--loss); }
+
+/* حالات فارغة / تحميل ------------------------------------------------------ */
+.empty { text-align: center; padding: 48px 20px; color: var(--text-2); }
+.empty .icon { font-size: 2.4rem; margin-bottom: 10px; }
+.spinner {
+  width: 34px; height: 34px; border-radius: 50%;
+  border: 3px solid var(--border); border-top-color: var(--brand);
+  animation: spin .7s linear infinite; margin: 40px auto;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.skeleton { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: sk 1.3s ease infinite; border-radius: 8px; }
+@keyframes sk { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
+
+/* النوافذ المنبثقة (Modal) ------------------------------------------------- */
+.modal-backdrop {
+  position: fixed; inset: 0; background: rgba(4,10,20,.55); z-index: 60;
+  display: grid; place-items: center; padding: 16px; backdrop-filter: blur(2px);
+}
+.modal {
+  width: 100%; max-width: 480px; background: var(--surface);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border); max-height: 90vh; overflow-y: auto;
+}
+.modal-head { padding: 18px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.modal-head h3 { font-weight: 800; font-size: 1.1rem; }
+.modal-body { padding: 20px; }
+.modal-foot { padding: 14px 20px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-start; }
+.icon-btn { background: transparent; border: 0; cursor: pointer; color: var(--text-3); font-size: 1.4rem; line-height: 1; padding: 4px; border-radius: 8px; }
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+
+/* شبكة التذييل ------------------------------------------------------------- */
+.site-footer { text-align: center; color: var(--text-3); font-size: .82rem; padding: 24px 16px 40px; }
+
+/* إشعار (toast) ------------------------------------------------------------ */
+.toast-host { position: fixed; inset-block-end: 20px; inset-inline-start: 50%; transform: translateX(50%); z-index: 80; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: var(--text); color: var(--surface); padding: 11px 18px; border-radius: 999px; font-weight: 700; font-size: .9rem; box-shadow: var(--shadow-lg); animation: toast-in .2s ease; }
+.toast.ok  { background: var(--win); color: #fff; }
+.toast.err { background: var(--loss); color: #fff; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+/* لوحة الإدارة ------------------------------------------------------------- */
+.admin-bar { background: var(--accent-050); border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
+.admin-bar .wrap { max-width: var(--maxw); margin: 0 auto; padding: 8px 16px; display: flex; align-items: center; gap: 12px; font-size: .85rem; font-weight: 700; color: #8a6300; }
+.admin-list-item {
+  display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); margin-bottom: 8px;
+}
+.admin-list-item .grow { flex: 1; min-width: 0; }
+.admin-list-item .grow .sub { color: var(--text-3); font-size: .82rem; }
+
+/* الطباعة ------------------------------------------------------------------ */
+@media print {
+  .site-header, .tabs, .filters, .header-link, .btn, .admin-bar, .toast-host, .site-footer { display: none !important; }
+  body { background: #fff; }
+  .card, .match, .table-wrap { box-shadow: none; border-color: #ccc; }
+  .container { padding: 0; }
+}
+
+/* الموبايل ----------------------------------------------------------------- */
+@media (max-width: 560px) {
+  .match { grid-template-columns: 52px 1fr auto 1fr; padding: 12px 10px; gap: 6px; font-size: .9rem; }
+  .match .team .name { font-size: .88rem; }
+  .match .score { min-width: 62px; font-size: 1.1rem; }
+  .page-title { font-size: 1.35rem; }
+  .row-2 { grid-template-columns: 1fr; }
+  table.standings { min-width: 480px; }
+  .brand { font-size: 1rem; }
+}
