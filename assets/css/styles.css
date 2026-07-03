@@ -67,7 +67,7 @@
 *, *::before, *::after { box-sizing: border-box; }
 html {
   -webkit-text-size-adjust: 100%;
-  font-size: calc(16px * var(--font-scale, 0.9)); /* التلقائي صغير؛ يُعدَّل من الإعدادات */
+  font-size: calc(16px * var(--font-scale, 0.88)); /* التلقائي: المستوى ٣؛ يُعدَّل من الإعدادات */
   scroll-behavior: smooth;
 }
 body {
@@ -234,33 +234,38 @@ img { max-width: 100%; }
 .standings-block { margin-bottom: 24px; }
 .standings-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; font-weight: 800; font-size: 1.02rem; color: var(--ink); }
 .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--surface); }
-table.standings { width: 100%; border-collapse: collapse; }
+/* التخطيط الثابت يضمن اتّساع كل الأعمدة داخل الشاشة بلا تمرير أفقي */
+table.standings { width: 100%; border-collapse: collapse; table-layout: fixed; }
 table.standings .col-extra { display: none; }
+.standings-wrap.show-all table.standings { table-layout: auto; min-width: 640px; }
 .standings-wrap.show-all table.standings .col-extra { display: table-cell; }
-.standings-wrap.show-all table.standings { min-width: 640px; }
+
+/* عرض الأعمدة في الوضع المضغوط */
+table.standings thead th.rank-col { width: 32px; }
+table.standings thead th.stat-col { width: 11.5%; }
+table.standings thead th.pts-col  { width: 46px; }
+table.standings thead th.team-col { width: auto; }
 
 table.standings thead th {
-  background: var(--surface-2); color: var(--text-3); font-size: .72rem; font-weight: 700;
-  text-align: center; padding: 12px 5px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  background: var(--surface-2); color: var(--text-3); font-size: .7rem; font-weight: 700;
+  text-align: center; padding: 11px 3px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-table.standings th.team-col, table.standings td.team-col { text-align: start; }
-table.standings th.team-col, table.standings td.team-col { padding-inline-start: 14px; }
+table.standings th.team-col, table.standings td.team-col { text-align: start; padding-inline-start: 8px; }
 table.standings tbody td {
-  padding: 13px 5px; text-align: center; font-variant-numeric: tabular-nums;
-  border-bottom: 1px solid var(--border); font-weight: 600; font-size: .9rem; color: var(--text-2);
+  padding: 12px 3px; text-align: center; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border); font-weight: 700; font-size: .9rem; color: var(--text-2);
 }
 table.standings tbody tr:last-child td { border-bottom: 0; }
 
 /* الرتبة كدائرة */
 table.standings .rank {
-  display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
-  background: var(--surface-2); font-size: .82rem; font-weight: 800; color: var(--text-2);
+  display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 50%;
+  background: var(--surface-2); font-size: .8rem; font-weight: 800; color: var(--text-2);
 }
-table.standings td.team-col { max-width: 42vw; }
-table.standings .team-name { font-weight: 800; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; font-size: .95rem; }
+table.standings .team-name { font-weight: 800; color: var(--ink); overflow-wrap: anywhere; line-height: 1.3; font-size: .92rem; }
 
 /* النقاط مُبرَزة كرقاقة */
-table.standings .pts { display: inline-grid; place-items: center; min-width: 30px; height: 28px; padding: 0 8px; border-radius: 8px; background: var(--brand-soft); color: var(--brand-strong); font-weight: 800; font-size: .98rem; }
+table.standings .pts { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 5px; border-radius: 7px; background: var(--brand-soft); color: var(--brand-strong); font-weight: 800; font-size: .92rem; }
 
 table.standings td.pos-diff.pos { color: var(--win); }
 table.standings td.pos-diff.neg { color: var(--loss); }
@@ -424,6 +429,10 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
 .seg-btn { padding: 7px 13px; border: 0; background: transparent; color: var(--text-2); font-weight: 600; font-size: .84rem; border-radius: 7px; cursor: pointer; font-family: inherit; transition: .15s; }
 .seg-btn:hover { color: var(--ink); }
 .seg-btn.active { background: var(--surface); color: var(--brand); box-shadow: var(--shadow-xs); }
+.set-row-col { flex-direction: column; align-items: stretch; gap: 10px; }
+.set-sub { color: var(--text-3); font-weight: 600; font-size: .78rem; }
+.seg-nums { display: grid; grid-template-columns: repeat(10, 1fr); gap: 3px; width: 100%; }
+.seg-nums .seg-btn { padding: 8px 0; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* زرّ أيقونة في الرأس (إعدادات) */
 .header-icon-btn { display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; font-size: 1.15rem; transition: .15s; }

@@ -8,14 +8,9 @@ import { t } from "./i18n.js";
 const KEY_THEME = "tp_theme";     // auto | light | dark
 const KEY_FONT = "tp_fontscale";  // 0.9 | 1 | 1.12 | 1.25
 
-const DEFAULT_FONT = "0.9"; // التلقائي: صغير
-const FONT_STEPS = [
-  { v: "0.8", label: t.fontXSmall },
-  { v: "0.9", label: t.fontSmall },
-  { v: "1", label: t.fontNormal },
-  { v: "1.12", label: t.fontLarge },
-  { v: "1.28", label: t.fontXLarge },
-];
+// حجم الخطّ: ١٠ مستويات (١ الأصغر … ١٠ الأكبر)، والافتراضي المستوى ٣
+const FONT_SCALES = ["0.72", "0.8", "0.88", "0.96", "1.05", "1.15", "1.26", "1.38", "1.5", "1.65"];
+const DEFAULT_FONT = FONT_SCALES[2]; // المستوى ٣
 
 export function getTheme() { try { return localStorage.getItem(KEY_THEME) || "auto"; } catch { return "auto"; } }
 export function getFont() { try { return localStorage.getItem(KEY_FONT) || DEFAULT_FONT; } catch { return DEFAULT_FONT; } }
@@ -62,14 +57,18 @@ export function openSettings({ isAdmin = false } = {}) {
   );
 
   const fontSeg = seg(
-    FONT_STEPS.map((f) => ({ value: f.v, label: f.label })),
+    FONT_SCALES.map((v, i) => ({ value: v, label: String(i + 1) })),
     getFont(),
     (v) => { try { localStorage.setItem(KEY_FONT, v); } catch {} applyPrefs(); }
   );
+  fontSeg.classList.add("seg-nums");
 
   const rows = [
     el("div.set-row", {}, [el("div.set-label", { text: t.appearance }), themeSeg]),
-    el("div.set-row", {}, [el("div.set-label", { text: t.fontSize }), fontSeg]),
+    el("div.set-row.set-row-col", {}, [
+      el("div.set-label", {}, [t.fontSize, el("span.set-sub", { text: " (١ الأصغر · ١٠ الأكبر)" })]),
+      fontSeg,
+    ]),
   ];
 
   // زرّ التثبيت (يظهر فقط إن كان المتصفّح يدعمه)

@@ -120,16 +120,16 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
   const rows = computeGroupStandings(groupTeams, matches, points);
   const head = el("thead", {}, [
     el("tr", {}, [
-      el("th", { text: t.th_rank }),
+      el("th.rank-col", { text: t.th_rank }),
       el("th.team-col", { text: t.th_team }),
-      el("th", { text: t.th_played, title: t.th_played }),
-      el("th", { text: t.th_won_s, title: t.th_won }),
-      el("th", { text: t.th_draw_s, title: t.th_draw }),
-      el("th", { text: t.th_lost_s, title: t.th_lost }),
-      el("th.col-extra", { text: t.th_gf }),
-      el("th.col-extra", { text: t.th_ga }),
-      el("th.col-extra", { text: t.th_gd }),
-      el("th", { text: t.th_pts }),
+      el("th.stat-col", { text: t.th_played, title: t.th_played }),
+      el("th.stat-col", { text: t.th_won_s, title: t.th_won }),
+      el("th.stat-col", { text: t.th_draw_s, title: t.th_draw }),
+      el("th.stat-col", { text: t.th_lost_s, title: t.th_lost }),
+      el("th.stat-col.col-extra", { text: t.th_gf }),
+      el("th.stat-col.col-extra", { text: t.th_ga }),
+      el("th.stat-col.col-extra", { text: t.th_gd }),
+      el("th.pts-col", { text: t.th_pts }),
       el("th.col-extra", { text: t.th_form }),
     ]),
   ]);
