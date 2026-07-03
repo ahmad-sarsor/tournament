@@ -6,6 +6,7 @@ import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel }
 import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog } from "./util.js";
 import * as api from "./data.js";
 import { groupByDay, eventIcon } from "./render.js";
+import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
 const userBox = document.getElementById("user-box");
@@ -16,6 +17,9 @@ function cleanupAdmin() { if (adminUnsub) { adminUnsub(); adminUnsub = null; } }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 
 // ---- إقلاع -----------------------------------------------------------------
+
+applyPrefs();
+document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({ isAdmin: true }));
 
 async function boot() {
   if (!isConfigured) return renderSetupNeeded();
@@ -115,13 +119,10 @@ async function renderHome() {
   const tournaments = await api.fetchTournaments();
   const head = el("div.page-head", { style: "display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap" }, [
     el("div", {}, [el("h1.page-title", { text: t.tournaments }), el("p.page-sub", { text: "إدارة كل البطولات" })]),
-    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, [
-      el("button.btn.btn-outline", { text: "📥 " + t.loadSample, onclick: loadSample }),
-      el("button.btn.btn-primary", { text: "＋ " + t.newTournament, onclick: () => tournamentForm(null) }),
-    ]),
+    el("button.btn.btn-primary", { text: "＋ " + t.newTournament, onclick: () => tournamentForm(null) }),
   ]);
   const list = el("div");
-  if (!tournaments.length) list.appendChild(emptyState("🏆", "لا توجد بطولات — أنشئ واحدة أو حمّل بطولة تجريبية"));
+  if (!tournaments.length) list.appendChild(emptyState("🏆", "لا توجد بطولات بعد — أنشئ بطولتك الأولى"));
   for (const tr of tournaments) {
     list.appendChild(el("div.admin-list-item", {}, [
       el("div.grow", {}, [
@@ -139,12 +140,6 @@ async function renderHome() {
 async function removeTournament(tr) {
   if (!(await confirmDialog(`حذف البطولة «${tr.name}» وكل بياناتها؟ ${t.confirmDelete}`))) return;
   try { await api.deleteTournament(tr.id); toast(t.deleted, "ok"); route(); }
-  catch (e) { toast(e.message || t.errorGeneric, "err"); }
-}
-
-async function loadSample() {
-  if (!(await confirmDialog(t.loadSampleConfirm, { danger: false, confirmText: t.confirm }))) return;
-  try { await api.seedSampleTournament(); toast(t.saved, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 

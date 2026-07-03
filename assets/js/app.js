@@ -9,10 +9,14 @@ import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted,
 } from "./data.js";
 import { renderScheduleDays, standingsTable, eventsTimeline } from "./render.js";
+import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
 const brandName = document.getElementById("brand-name");
 if (SITE_NAME) { brandName.textContent = SITE_NAME; document.title = SITE_NAME; }
+
+applyPrefs();
+document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({ isAdmin: false }));
 
 let currentUnsub = null;              // إلغاء اشتراك التحديث اللحظي الحالي
 function cleanup() { if (currentUnsub) { currentUnsub(); currentUnsub = null; } }
@@ -150,13 +154,29 @@ function renderTournamentShell(state) {
       el("div", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" }, [
         el("h1.page-title", { text: tournament.name }),
         statusBadge(tournament.status),
+        shareBtn(tournament.name),
       ]),
       tournament.description ? el("p.page-sub", { text: tournament.description }) : null,
     ]),
     tabs,
     content,
   );
+  document.title = tournament.name + " · " + (SITE_NAME || "");
   renderTabContent(state);
+}
+
+// زرّ المشاركة (Web Share API مع احتياط نسخ الرابط)
+function shareBtn(title) {
+  return el("button.header-icon-btn", {
+    type: "button", title: t.share, "aria-label": t.share, text: "↗",
+    onclick: async () => {
+      const url = location.href;
+      try {
+        if (navigator.share) await navigator.share({ title, url });
+        else if (navigator.clipboard) { await navigator.clipboard.writeText(url); toast(t.linkCopied, "ok"); }
+      } catch (e) { /* أُلغيت المشاركة */ }
+    },
+  });
 }
 
 function tabBtn(label, id, tab, active) {
@@ -259,7 +279,8 @@ async function renderMatchDetail(id, matchId) {
   if (!match) return mount(app, backLink, emptyState("🔍", "المباراة غير موجودة"));
 
   const host = el("div");
-  mount(app, backLink, host);
+  mount(app, el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [backLink, shareBtn(t.matchDetails)]), host);
+  document.title = t.matchDetails + " · " + (SITE_NAME || "");
 
   const render = () => {
     const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
