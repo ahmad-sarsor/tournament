@@ -38,6 +38,9 @@ export const t = {
   th_gd: "الفارق",
   th_pts: "نقاط",
   th_form: "السجل",
+  th_won_s: "ف",
+  th_draw_s: "ت",
+  th_lost_s: "خ",
   matchesProgress: "مباراة",
   qualifies: "تأهُّل",
   standingsNote: "يُحدَّث الترتيب تلقائياً فور إدخال النتائج",
@@ -106,14 +109,37 @@ export const t = {
   fixturesDone: "تم توليد المباريات",
   needTeams: "أضف فِرقاً إلى البيوت أولاً",
 
-  // اللاعبون
+  // اللاعبون / السجل (التشكيلة)
   players: "اللاعبون",
+  squad: "السجل",
+  manageSquad: "سجلّ الفريق",
   managePlayers: "لاعبو الفريق",
+  addMember: "إضافة",
   addPlayer: "إضافة لاعب",
-  playerName: "اسم اللاعب",
+  playerName: "الاسم",
   playerNumber: "الرقم",
-  noPlayers: "لا يوجد لاعبون — أضف لاعبين للفريق",
+  memberRole: "الصفة",
+  role_player: "لاعب",
+  role_coach: "مدرب",
+  role_management: "إداري",
+  squadPlayers: "اللاعبون",
+  squadCoach: "الجهاز الفنّي",
+  squadManagement: "الإدارة",
+  noPlayers: "لا يوجد أعضاء — أضف لاعبين ومدرّباً وإدارة",
   unknownPlayer: "غير معروف",
+  newPlayer: "لاعب جديد",
+  newPlayerPrompt: "اسم اللاعب الجديد",
+
+  // تفاصيل المباراة (صفحة مستقلّة)
+  matchDetails: "تفاصيل المباراة",
+  backToSchedule: "البرنامج",
+  lineups: "التشكيلة",
+  noLineup: "لم تُسجَّل التشكيلة",
+  matchInfo: "معلومات المباراة",
+
+  // الترتيب — عرض مضغوط
+  showMore: "تفاصيل أكثر",
+  showLess: "إخفاء",
 
   // إدارة مباشرة + أحداث
   liveManage: "إدارة مباشرة",

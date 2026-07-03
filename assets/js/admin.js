@@ -330,28 +330,34 @@ async function removeTeam(tm) {
 
 function playersModal(state, team) {
   const list = el("div");
+  const roleLabel = { player: t.squadPlayers, coach: t.squadCoach, management: t.squadManagement };
   const render = () => {
-    const players = (state.players || []).filter((p) => p.team_id === team.id)
+    const members = (state.players || []).filter((p) => p.team_id === team.id)
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
     clear(list);
-    if (!players.length) list.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noPlayers }));
-    for (const p of players) {
-      list.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
-        p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
-        el("div.grow", { text: p.name }),
-        el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => playerForm(state, team, p) }),
-        el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removePlayer(state, team, p) }),
-      ]));
+    if (!members.length) { list.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noPlayers })); return; }
+    for (const role of ["player", "coach", "management"]) {
+      const arr = members.filter((p) => (p.role || "player") === role);
+      if (!arr.length) continue;
+      list.appendChild(el("div.lu-label", { style: "margin:12px 2px 4px", text: roleLabel[role] }));
+      for (const p of arr) {
+        list.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
+          role === "player" && p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
+          el("div.grow", { text: p.name }),
+          el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => playerForm(state, team, p) }),
+          el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removePlayer(state, team, p) }),
+        ]));
+      }
     }
   };
   render();
   openModal({
-    title: `${t.managePlayers} — ${team.name}`,
+    title: `${t.manageSquad} — ${team.name}`,
     body: el("div", {}, [
       list,
-      el("button.btn.btn-primary.btn-block", { style: "margin-top:12px", text: "＋ " + t.addPlayer, onclick: () => playerForm(state, team, null) }),
+      el("button.btn.btn-primary.btn-block", { style: "margin-top:14px", text: "＋ " + t.addMember, onclick: () => playerForm(state, team, null) }),
     ]),
-    onDismiss: () => route(), // نُحدّث التبويب (عدّاد اللاعبين) عند الإغلاق
+    onDismiss: () => route(), // نُحدّث التبويب (عدّاد الأعضاء) عند الإغلاق
   });
   // نُبقي النافذة مفتوحة ونعيد الرسم بعد كل تعديل عبر state المحلي
   playersModal._refresh = render;
@@ -361,21 +367,28 @@ function playerForm(state, team, existing) {
   const nextOrder = ((state.players || []).filter((p) => p.team_id === team.id)
     .reduce((m, p) => Math.max(m, p.sort_order ?? 0), 0)) + 1;
   formModal({
-    title: existing ? t.edit : t.addPlayer,
+    title: existing ? t.edit : t.addMember,
     fields: [
       { name: "name", label: t.playerName, value: existing?.name, attrs: { required: true } },
-      { name: "number", label: t.playerNumber, type: "number", value: existing?.number ?? "", attrs: { min: 0, inputmode: "numeric" } },
+      { name: "role", label: t.memberRole, type: "select", value: existing?.role || "player",
+        options: [
+          { value: "player", label: t.role_player },
+          { value: "coach", label: t.role_coach },
+          { value: "management", label: t.role_management },
+        ] },
+      { name: "number", label: t.playerNumber + " (للاعبين)", type: "number", value: existing?.number ?? "", attrs: { min: 0, inputmode: "numeric" } },
     ],
     onSubmit: async (v, close) => {
       const name = v.name.trim();
       if (!name) return toast("الاسم مطلوب", "err");
+      const role = v.role || "player";
       const number = v.number === "" ? null : toInt(v.number, null);
       if (existing) {
-        await api.updatePlayer(existing.id, { name, number });
-        Object.assign(existing, { name, number });
+        await api.updatePlayer(existing.id, { name, number, role });
+        Object.assign(existing, { name, number, role });
       } else {
         const created = await api.createPlayer({
-          tournament_id: team.tournament_id, team_id: team.id, name, number, sort_order: nextOrder,
+          tournament_id: team.tournament_id, team_id: team.id, name, number, role, sort_order: nextOrder,
         });
         (state.players ||= []).push(created);
       }
@@ -557,7 +570,7 @@ async function renderLiveConsole(tid, matchId) {
   adminUnsub = api.subscribeTournament(tid, debounce(() => { reload().catch((e) => console.error(e)); }, 400));
 
   function playersOf(teamId) {
-    return (bundle.players || []).filter((p) => p.team_id === teamId)
+    return (bundle.players || []).filter((p) => p.team_id === teamId && (p.role || "player") === "player")
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   }
 
@@ -577,18 +590,44 @@ async function renderLiveConsole(tid, matchId) {
         await reload();
       } catch (e) { toast(e.message || t.errorGeneric, "err"); }
     };
+    // إضافة لاعب جديد لحظياً ثم تسجيله كصاحب الحدث
+    const addNewThenPick = () => {
+      const nameInput = el("input.input", { placeholder: t.newPlayerPrompt });
+      const form2 = el("form", {}, [el("div.field", {}, [el("label", { text: t.newPlayerPrompt }), nameInput])]);
+      const submitNew = async () => {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        let created;
+        try {
+          const order = ((bundle.players || []).filter((p) => p.team_id === teamId).reduce((m, p) => Math.max(m, p.sort_order ?? 0), 0)) + 1;
+          created = await api.createPlayer({ tournament_id: match.tournament_id, team_id: teamId, name, number: null, role: "player", sort_order: order });
+        } catch (e) { return toast(e.message || t.errorGeneric, "err"); }
+        close2();
+        pick(created.id); // النافذة الأصلية ما زالت مفتوحة؛ pick يقرأ الدقيقة ويغلقها
+      };
+      form2.addEventListener("submit", (e) => { e.preventDefault(); submitNew(); });
+      form2.appendChild(el("button", { type: "submit", hidden: true }));
+      const close2 = openModal({
+        title: "＋ " + t.newPlayer,
+        body: form2,
+        footer: [
+          el("button.btn.btn-primary", { type: "button", text: t.save, onclick: submitNew }),
+          el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close2() }),
+        ],
+      });
+    };
     const grid = el("div.player-grid");
     for (const p of players) {
       grid.appendChild(el("button.btn.player-pick", { type: "button",
         text: (p.number != null && p.number !== "" ? p.number + " · " : "") + p.name, onclick: () => pick(p.id) }));
     }
+    grid.appendChild(el("button.btn.player-pick.pick-new", { type: "button", text: "＋ " + t.newPlayer, onclick: addNewThenPick }));
     grid.appendChild(el("button.btn.btn-outline.player-pick", { type: "button", text: t.noPlayerKnown, onclick: () => pick(null) }));
     close = openModal({
       title: `${eventIcon(type)} ${type === "goal" ? t.whoScored : t.whoBooked}`,
       body: el("div", {}, [
         el("div.lc-picker-team", { text: team ? team.name : "" }),
         el("div.field", {}, [el("label", { text: t.minute, for: "picker-min" }), (minInput.id = "picker-min", minInput)]),
-        !players.length ? el("p.page-sub", { style: "margin:4px 0 10px", text: t.addPlayersFirst }) : null,
         grid,
       ]),
     });

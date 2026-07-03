@@ -56,9 +56,9 @@ export function eventsTimeline(events, playersById, teamById) {
   return list;
 }
 
-// بطاقة مباراة واحدة (للعرض) — قابلة للتوسّع لعرض الأحداث إن وُجدت
+// بطاقة مباراة (رابط يفتح صفحة المباراة عند وجود tid) — مضغوطة بأسلوب 365
 export function matchCard(m, teamById, groupById, opts = {}) {
-  const { showGroup = true, events = [], playersById = new Map() } = opts;
+  const { showGroup = true, tid } = opts;
   const home = teamById.get(m.home_team_id);
   const away = teamById.get(m.away_team_id);
   const homeName = home ? home.name : "—";
@@ -72,13 +72,9 @@ export function matchCard(m, teamById, groupById, opts = {}) {
 
   let scoreEl;
   if (finished || (live && m.home_score != null)) {
-    scoreEl = el("div.score", {}, [
-      String(m.home_score ?? 0),
-      el("span.sep", { text: "-" }),
-      String(m.away_score ?? 0),
-    ]);
+    scoreEl = el("div.score", {}, [String(m.home_score ?? 0), el("span.sep", { text: "-" }), String(m.away_score ?? 0)]);
   } else {
-    scoreEl = el("div.score.pending", { text: "–" }); // فاصل «ضد»؛ الوقت يظهر على الجانب
+    scoreEl = el("div.score.pending", { text: "–" });
   }
 
   const timeCol = el("div.time", {}, [
@@ -87,38 +83,21 @@ export function matchCard(m, teamById, groupById, opts = {}) {
     live ? el("span.grp", {}, [el("span.badge.badge-live", {}, [el("span.dot"), t.live])]) : null,
   ]);
 
-  const hasEvents = events.length > 0;
-  const matchEl = el("div.match" + (live ? ".is-live" : "") + (hasEvents ? ".has-events" : ""), {}, [
-    timeCol,
-    el("div.match-center", {}, [
-      el("div.team.home" + (homeWin ? ".winner" : ""), {}, [el("span.name", { title: homeName, text: homeName })]),
-      scoreEl,
-      el("div.team.away" + (awayWin ? ".winner" : ""), {}, [el("span.name", { title: awayName, text: awayName })]),
-    ]),
+  const center = el("div.match-center", {}, [
+    el("div.team.home" + (homeWin ? ".winner" : ""), {}, [el("span.name", { text: homeName })]),
+    scoreEl,
+    el("div.team.away" + (awayWin ? ".winner" : ""), {}, [el("span.name", { text: awayName })]),
   ]);
 
-  if (!hasEvents) return matchEl;
-
-  const details = el("div.match-details", { hidden: true }, [eventsTimeline(events, playersById, teamById)]);
-  matchEl.setAttribute("role", "button");
-  matchEl.setAttribute("tabindex", "0");
-  matchEl.setAttribute("aria-expanded", "false");
-  const toggle = () => {
-    const open = details.hidden;
-    details.hidden = !open;
-    matchEl.classList.toggle("open", open);
-    matchEl.setAttribute("aria-expanded", String(open));
-  };
-  matchEl.addEventListener("click", toggle);
-  matchEl.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); }
-  });
-  return el("div.match-wrap", {}, [matchEl, details]);
+  const tag = tid ? "a.match.tappable" : "div.match";
+  return el(tag + (live ? ".is-live" : ""), tid ? { href: `#/t/${tid}/m/${m.id}` } : {}, [
+    timeCol, center, tid ? el("span.match-go", { "aria-hidden": "true", text: "‹" }) : null,
+  ]);
 }
 
 // عرض البرنامج مجمّعاً بالأيام
 export function renderScheduleDays(matches, teamById, groupById, extra = {}) {
-  const { eventsByMatch, playersById } = extra;
+  const { tid } = extra;
   if (!matches.length) {
     return el("div.empty", {}, [el("div.icon", { text: "📅" }), el("div", { text: t.noMatches })]);
   }
@@ -130,12 +109,7 @@ export function renderScheduleDays(matches, teamById, groupById, extra = {}) {
       el("span.line"),
     ]);
     const wrap = el("div.day-group", {}, [head]);
-    for (const m of dayMatches) {
-      wrap.appendChild(matchCard(m, teamById, groupById, {
-        events: eventsByMatch ? (eventsByMatch.get(m.id) || []) : [],
-        playersById: playersById || new Map(),
-      }));
-    }
+    for (const m of dayMatches) wrap.appendChild(matchCard(m, teamById, groupById, { tid }));
     frag.appendChild(wrap);
   }
   return frag;
@@ -148,15 +122,15 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
     el("tr", {}, [
       el("th", { text: t.th_rank }),
       el("th.team-col", { text: t.th_team }),
-      el("th", { text: t.th_played }),
-      el("th", { text: t.th_won }),
-      el("th", { text: t.th_draw }),
-      el("th", { text: t.th_lost }),
-      el("th", { text: t.th_gf }),
-      el("th", { text: t.th_ga }),
-      el("th", { text: t.th_gd }),
+      el("th", { text: t.th_played, title: t.th_played }),
+      el("th", { text: t.th_won_s, title: t.th_won }),
+      el("th", { text: t.th_draw_s, title: t.th_draw }),
+      el("th", { text: t.th_lost_s, title: t.th_lost }),
+      el("th.col-extra", { text: t.th_gf }),
+      el("th.col-extra", { text: t.th_ga }),
+      el("th.col-extra", { text: t.th_gd }),
       el("th", { text: t.th_pts }),
-      el("th", { text: t.th_form }),
+      el("th.col-extra", { text: t.th_form }),
     ]),
   ]);
   const body = el("tbody");
@@ -171,11 +145,11 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
       el("td", { text: String(r.won) }),
       el("td", { text: String(r.drawn) }),
       el("td", { text: String(r.lost) }),
-      el("td", { text: String(r.gf) }),
-      el("td", { text: String(r.ga) }),
-      el("td.pos-diff" + gdClass, { text: (r.gd > 0 ? "+" : "") + r.gd }),
+      el("td.col-extra", { text: String(r.gf) }),
+      el("td.col-extra", { text: String(r.ga) }),
+      el("td.pos-diff.col-extra" + gdClass, { text: (r.gd > 0 ? "+" : "") + r.gd }),
       el("td.pts", { text: String(r.points) }),
-      el("td", {}, [formGuide(teamForm(r.team.id, matches))]),
+      el("td.col-extra", {}, [formGuide(teamForm(r.team.id, matches))]),
     ]));
   }
   return el("div.table-wrap", {}, [el("table.standings", {}, [head, body])]);

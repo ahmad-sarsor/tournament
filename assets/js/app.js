@@ -3,12 +3,12 @@
 // ============================================================================
 import { isConfigured } from "./firebase.js";
 import { SITE_NAME } from "./config.js";
-import { t, statusLabel, formatDate } from "./i18n.js";
+import { t, statusLabel, matchStatusLabel, formatDate, formatTime, weekdayName } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast } from "./util.js";
 import {
-  fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament,
+  fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted,
 } from "./data.js";
-import { renderScheduleDays, standingsTable } from "./render.js";
+import { renderScheduleDays, standingsTable, eventsTimeline } from "./render.js";
 
 const app = document.getElementById("app");
 const brandName = document.getElementById("brand-name");
@@ -22,8 +22,11 @@ function cleanup() { if (currentUnsub) { currentUnsub(); currentUnsub = null; } 
 function parseHash() {
   const raw = location.hash.replace(/^#\/?/, "");
   const parts = raw.split("/").filter(Boolean);
-  // "" | "t/:id" | "t/:id/:tab"
-  if (parts[0] === "t" && parts[1]) return { view: "tournament", id: parts[1], tab: parts[2] || "schedule" };
+  // "" | "t/:id" | "t/:id/:tab" | "t/:id/m/:matchId"
+  if (parts[0] === "t" && parts[1]) {
+    if (parts[2] === "m" && parts[3]) return { view: "match", id: parts[1], matchId: parts[3] };
+    return { view: "tournament", id: parts[1], tab: parts[2] || "schedule" };
+  }
   return { view: "home" };
 }
 
@@ -32,8 +35,10 @@ async function route() {
   if (!isConfigured) return renderSetupNeeded();
   const r = parseHash();
   try {
-    if (r.view === "tournament") await renderTournament(r.id, r.tab);
+    if (r.view === "match") await renderMatchDetail(r.id, r.matchId);
+    else if (r.view === "tournament") await renderTournament(r.id, r.tab);
     else await renderHome();
+    window.scrollTo(0, 0);
   } catch (err) {
     console.error(err);
     renderError(err);
@@ -171,15 +176,9 @@ function renderTabContent(state) {
 // ---- تبويب البرنامج --------------------------------------------------------
 
 function renderSchedule(state) {
-  const { bundle } = state;
+  const { bundle, tournament } = state;
   const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
   const groupById = new Map(bundle.groups.map((x) => [x.id, x]));
-  const playersById = new Map((bundle.players || []).map((x) => [x.id, x]));
-  const eventsByMatch = new Map();
-  for (const e of bundle.events || []) {
-    if (!eventsByMatch.has(e.match_id)) eventsByMatch.set(e.match_id, []);
-    eventsByMatch.get(e.match_id).push(e);
-  }
   const wrap = el("div");
 
   // مرشّحات البيوت
@@ -190,7 +189,7 @@ function renderSchedule(state) {
     const matches = activeGroup === "all"
       ? bundle.matches
       : bundle.matches.filter((m) => m.group_id === activeGroup);
-    mount(listHost, renderScheduleDays(matches, teamById, groupById, { eventsByMatch, playersById }));
+    mount(listHost, renderScheduleDays(matches, teamById, groupById, { tid: tournament.id }));
   };
   const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
     text: label,
@@ -211,28 +210,131 @@ function renderSchedule(state) {
 function renderStandings(state) {
   const { bundle, tournament } = state;
   const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
-  const wrap = el("div", {}, [
-    el("div.alert.alert-info", { text: t.standingsNote }),
-  ]);
 
+  const tablesHost = el("div.standings-wrap"); // نبدأ مضغوطاً؛ الزر يُظهر بقية الأعمدة
   const groups = bundle.groups.length ? bundle.groups : [{ id: null, name: t.standings }];
   let any = false;
   for (const g of groups) {
     const groupTeams = bundle.teams.filter((x) => x.group_id === g.id);
     if (!groupTeams.length) continue;
     any = true;
-    wrap.appendChild(el("div.standings-block", {}, [
+    tablesHost.appendChild(el("div.standings-block", {}, [
       el("div.standings-title", {}, [el("span", { text: "🏠" }), el("span", { text: g.name })]),
       standingsTable(groupTeams, bundle.matches, points, tournament.qualifiers_per_group),
     ]));
   }
   if (!any) return emptyState("📊", t.noTeams);
 
-  wrap.appendChild(el("div.legend", {}, [
-    el("span", {}, [el("span.swatch"), t.qualifies]),
-    el("span", { text: t.tieBreak }),
-  ]));
-  return wrap;
+  let showAll = false;
+  const toggle = el("button.btn.btn-sm.btn-outline", { text: "＋ " + t.showMore, onclick: () => {
+    showAll = !showAll;
+    tablesHost.classList.toggle("show-all", showAll);
+    toggle.textContent = (showAll ? "－ " : "＋ ") + (showAll ? t.showLess : t.showMore);
+  } });
+
+  return el("div", {}, [
+    el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap" }, [
+      el("div.page-sub", { style: "margin:0", text: t.standingsNote }),
+      toggle,
+    ]),
+    tablesHost,
+    el("div.legend", {}, [
+      el("span", {}, [el("span.swatch"), t.qualifies]),
+      el("span", { text: t.tieBreak }),
+    ]),
+  ]);
+}
+
+// ---- صفحة المباراة (مستقلّة، مثل 365) --------------------------------------
+
+async function renderMatchDetail(id, matchId) {
+  mount(app, spinner());
+  const tournament = await fetchTournament(id);
+  if (!tournament) return mount(app, emptyState("🔍", "البطولة غير موجودة"),
+    el("a.btn.btn-outline", { href: "#/", text: t.backToTournaments }));
+  let bundle = await fetchTournamentBundle(id);
+  let match = bundle.matches.find((m) => m.id === matchId);
+  const backLink = el("a.header-link", { href: `#/t/${id}/schedule`,
+    text: "→ " + t.backToSchedule, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" });
+  if (!match) return mount(app, backLink, emptyState("🔍", "المباراة غير موجودة"));
+
+  const host = el("div");
+  mount(app, backLink, host);
+
+  const render = () => {
+    const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
+    const groupById = new Map(bundle.groups.map((x) => [x.id, x]));
+    const playersById = new Map((bundle.players || []).map((x) => [x.id, x]));
+    const home = teamById.get(match.home_team_id);
+    const away = teamById.get(match.away_team_id);
+    const group = groupById.get(match.group_id);
+    const events = (bundle.events || []).filter((e) => e.match_id === matchId);
+    const finished = isCounted(match);
+    const live = match.status === "live";
+    const showScore = finished || (live && match.home_score != null);
+
+    const scoreMid = showScore
+      ? el("div.mp-score", {}, [String(match.home_score ?? 0), el("span.sep", { text: ":" }), String(match.away_score ?? 0)])
+      : el("div.mp-score.time", {}, [match.match_time ? formatTime(match.match_time) : t.vs]);
+
+    const metaParts = [
+      group ? group.name : null,
+      match.match_date ? weekdayName(match.match_date) + " " + formatDate(match.match_date) : null,
+      match.match_time ? formatTime(match.match_time) : null,
+    ].filter(Boolean);
+
+    const lineupCol = (team) => {
+      const members = (bundle.players || []).filter((p) => team && p.team_id === team.id)
+        .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+      const ofRole = (r) => members.filter((p) => (p.role || "player") === r);
+      const section = (label, arr, showNum) => arr.length ? el("div.lu-group", {}, [
+        el("div.lu-label", { text: label }),
+        ...arr.map((p) => el("div.lu-row", {}, [
+          showNum && p.number != null && p.number !== "" ? el("span.player-num", { text: String(p.number) }) : null,
+          el("span", { text: p.name }),
+        ])),
+      ]) : null;
+      return el("div.lu-card", {}, [
+        el("div.lu-team", { text: team ? team.name : "—" }),
+        section(t.squadPlayers, ofRole("player"), true),
+        section(t.squadCoach, ofRole("coach"), false),
+        section(t.squadManagement, ofRole("management"), false),
+        !members.length ? el("p.page-sub", { style: "padding:4px 2px", text: t.noLineup }) : null,
+      ]);
+    };
+
+    mount(host,
+      el("div.mp-scoreboard" + (live ? ".is-live" : ""), {}, [
+        el("div.mp-team", {}, [el("span.mp-team-name", { text: home ? home.name : "—" })]),
+        scoreMid,
+        el("div.mp-team", {}, [el("span.mp-team-name", { text: away ? away.name : "—" })]),
+      ]),
+      el("div.mp-meta", {}, [
+        el("span", { text: metaParts.join(" · ") }),
+        live ? el("span.badge.badge-live", {}, [el("span.dot"), t.live])
+             : el("span.badge.badge-" + (finished ? "finished" : "upcoming"), { text: matchStatusLabel(match.status) }),
+      ]),
+      el("div.mp-section", {}, [
+        el("h3.mp-title", { text: t.events }),
+        events.length ? el("div.card", {}, [eventsTimeline(events, playersById, teamById)])
+                      : el("p.page-sub", { style: "padding:6px 2px", text: t.noEvents }),
+      ]),
+      el("div.mp-section", {}, [
+        el("h3.mp-title", { text: t.lineups }),
+        el("div.mp-lineups", {}, [lineupCol(home), lineupCol(away)]),
+      ]),
+    );
+  };
+  render();
+
+  currentUnsub = subscribeTournament(id, debounce(async () => {
+    try {
+      bundle = await fetchTournamentBundle(id);
+      const m2 = bundle.matches.find((m) => m.id === matchId);
+      if (m2) match = m2;
+      render();
+    } catch (e) { console.error(e); }
+  }, 400));
 }
 
 // ---- أدوات -----------------------------------------------------------------

@@ -175,14 +175,16 @@ img { max-width: 100%; }
 .day-head .date { color: var(--text-3); font-weight: 600; font-size: .8rem; }
 .day-head .line { flex: 1; height: 1px; background: var(--border); }
 
-.match-wrap { margin-bottom: 9px; }
 .match {
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: center; gap: 14px; margin-bottom: 9px; color: var(--text);
   padding: 12px 16px; background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow-xs); transition: border-color .15s, box-shadow .15s;
 }
-.match-wrap .match { margin-bottom: 0; }
+.match.tappable { cursor: pointer; }
+.match.tappable:hover { border-color: var(--border-2); box-shadow: var(--shadow-sm); }
 .match:hover { border-color: var(--border-2); }
+.match-go { flex: 0 0 auto; color: var(--text-3); font-size: 1.3rem; line-height: 1; transition: transform .15s, color .15s; }
+.match.tappable:hover .match-go { color: var(--brand); transform: translateX(-3px); }
 .match.is-live { border-color: color-mix(in srgb, var(--live) 45%, var(--border)); }
 .match .time {
   flex: 0 0 auto; min-width: 50px; text-align: center;
@@ -191,11 +193,12 @@ img { max-width: 100%; }
 }
 .match .time .grp { display: block; font-size: .66rem; color: var(--text-3); font-weight: 600; margin-top: 2px; }
 /* النتيجة في المنتصف تماماً، والاسمان ملتصقان بها (مثل 365) */
-.match-center { flex: 1; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 14px; min-width: 0; }
+.match-center { flex: 1; display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 12px; min-width: 0; }
 .match-center .team { min-width: 0; font-weight: 600; color: var(--text-2); }
 .match-center .team.home { text-align: end; }
 .match-center .team.away { text-align: start; }
-.match-center .team .name { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; }
+/* الأسماء الطويلة تُلتَفّ بالكامل بدل قصّها */
+.match-center .team .name { display: inline-block; max-width: 100%; line-height: 1.32; overflow-wrap: anywhere; word-break: break-word; }
 .match-center .team.winner { color: var(--ink); }
 .match-center .team.winner .name { font-weight: 700; }
 .match-center .score {
@@ -206,20 +209,39 @@ img { max-width: 100%; }
 .match.is-live .score { color: var(--live); }
 .match-center .score .sep { color: var(--text-3); font-weight: 600; }
 .match-center .score.pending { font-size: .8rem; font-weight: 700; color: var(--text-3); background: transparent; min-width: auto; }
-.match.has-events { cursor: pointer; position: relative; }
-.match.has-events::after { content: "⌄"; position: absolute; inset-inline-start: 8px; bottom: 0; color: var(--text-3); font-size: .85rem; line-height: 1; transition: transform .18s; }
-.match.has-events.open::after { transform: rotate(180deg); }
-.match.has-events.open { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-.match-details {
-  border: 1px solid var(--border); border-top: 0; border-radius: 0 0 var(--radius) var(--radius);
-  background: var(--surface-2); overflow: hidden;
+/* ===== صفحة المباراة (مستقلّة، مثل 365) ================================= */
+.mp-scoreboard {
+  display: grid; grid-template-columns: minmax(0,1fr) auto minmax(0,1fr); align-items: center; gap: 14px;
+  background: linear-gradient(150deg, var(--brand-strong), var(--brand-deep)); color: #fff;
+  border-radius: var(--radius-lg); padding: 26px 18px; margin: 12px 0 14px; box-shadow: var(--shadow-md);
 }
+.mp-scoreboard.is-live { box-shadow: 0 0 0 2px var(--live), var(--shadow-md); }
+.mp-team { text-align: center; min-width: 0; }
+.mp-team-name { font-weight: 700; font-size: 1.15rem; overflow-wrap: anywhere; line-height: 1.3; }
+.mp-score { font-size: 2.7rem; font-weight: 800; font-variant-numeric: tabular-nums; display: flex; gap: 10px; align-items: center; justify-content: center; }
+.mp-score.time { font-size: 1.6rem; opacity: .95; }
+.mp-score .sep { opacity: .6; }
+.mp-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; color: var(--text-2); font-size: .9rem; font-weight: 600; margin: 0 2px 22px; }
+.mp-section { margin-bottom: 22px; }
+.mp-title { font-weight: 700; font-size: 1.05rem; margin-bottom: 10px; }
+.mp-lineups { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
+.lu-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); padding: 14px; box-shadow: var(--shadow-xs); }
+.lu-team { font-weight: 800; color: var(--ink); text-align: center; padding-bottom: 10px; margin-bottom: 8px; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.lu-group { margin-bottom: 12px; }
+.lu-label { font-size: .74rem; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: .02em; margin-bottom: 6px; }
+.lu-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-weight: 600; font-size: .92rem; }
+.lu-row .player-num { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 6px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: .78rem; }
 
 /* ===== الترتيب (الجداول) ================================================= */
 .standings-block { margin-bottom: 26px; }
 .standings-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; font-weight: 700; font-size: 1.05rem; color: var(--ink); }
 .table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-xs); background: var(--surface); }
-table.standings { width: 100%; border-collapse: collapse; min-width: 620px; }
+table.standings { width: 100%; border-collapse: collapse; }
+/* الأعمدة الإضافية مخفيّة افتراضياً (عرض مضغوط للهاتف)، وتظهر بالزر */
+table.standings .col-extra { display: none; }
+.standings-wrap.show-all table.standings .col-extra { display: table-cell; }
+.standings-wrap.show-all .table-wrap { overflow-x: auto; }
+.standings-wrap.show-all table.standings { min-width: 620px; }
 table.standings thead th {
   background: var(--surface-2); color: var(--text-3); font-size: .72rem; font-weight: 700; letter-spacing: .02em;
   text-align: center; padding: 11px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; text-transform: uppercase;
@@ -233,8 +255,8 @@ table.standings tr.qualify td.team-col { box-shadow: inset 3px 0 0 var(--brand);
 table.standings tr.qualify .rank { background: var(--brand); color: #fff; }
 table.standings tr.champion .rank { background: var(--gold); color: #4a2f00; }
 table.standings .pts { font-weight: 800; color: var(--ink); font-size: .98rem; }
-table.standings .team-cell { display: flex; align-items: center; gap: 10px; }
-table.standings .team-name { font-weight: 700; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.standings td.team-col { max-width: 40vw; }
+table.standings .team-name { font-weight: 700; color: var(--ink); overflow-wrap: anywhere; line-height: 1.35; }
 table.standings td.pos-diff.pos { color: var(--win); }
 table.standings td.pos-diff.neg { color: var(--loss); }
 
@@ -375,6 +397,7 @@ table.standings td.pos-diff.neg { color: var(--loss); }
 .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .player-pick { min-height: 48px; justify-content: center; text-align: center; background: var(--surface-2); font-weight: 600; }
 .player-pick:hover { border-color: var(--brand); color: var(--brand); }
+.player-pick.pick-new { border-style: dashed; color: var(--brand); background: var(--brand-soft); }
 
 /* إمكانية الوصول ----------------------------------------------------------- */
 .sr-only { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
@@ -403,12 +426,16 @@ table.standings td.pos-diff.neg { color: var(--loss); }
 /* الموبايل ----------------------------------------------------------------- */
 @media (max-width: 560px) {
   body { font-size: 15px; }
-  .match { padding: 11px 12px; gap: 10px; }
-  .match .time { min-width: 44px; padding-inline-end: 9px; }
-  .match-center { gap: 8px; }
-  .match-center .team { max-width: 42%; }
-  .match-center .team .name { font-size: .86rem; }
-  .match-center .score { min-width: 52px; font-size: 1.05rem; padding: 4px 9px; }
+  .match { padding: 11px 12px; gap: 9px; }
+  .match .time { min-width: 42px; padding-inline-end: 9px; font-size: .84rem; }
+  .match-center { gap: 9px; }
+  .match-center .team .name { font-size: .88rem; }
+  .match-center .score { min-width: 50px; font-size: 1.05rem; padding: 4px 9px; }
+  .match-go { font-size: 1.1rem; }
+  .mp-lineups { grid-template-columns: 1fr; }
+  .mp-score { font-size: 2.2rem; }
+  .mp-team-name { font-size: 1.02rem; }
+  table.standings tbody td, table.standings thead th { padding: 9px 5px; }
   .page-title { font-size: 1.4rem; }
   .row-2 { grid-template-columns: 1fr; }
   table.standings { min-width: 560px; }
