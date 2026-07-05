@@ -222,7 +222,8 @@ export function parseDate(iso) {
 export function formatDate(iso) {
   const dt = parseDate(iso);
   if (!dt) return "";
-  return `${dt.getDate()} ${t.months[dt.getMonth()]} ${dt.getFullYear()}`;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(dt.getDate())}/${pad(dt.getMonth() + 1)}/${dt.getFullYear()}`;
 }
 
 export function weekdayName(iso) {
