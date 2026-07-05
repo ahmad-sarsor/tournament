@@ -475,9 +475,9 @@ function renderMatchesTab(host, state) {
           el("div", { style: "font-weight:700", text: `${home}   ${score}   ${away}` }),
           el("div.sub", { text: [grp, matchStatusLabel(m.status)].filter(Boolean).join(" · ") }),
         ]),
-        el("a.btn.btn-sm.btn-accent", { href: `#/t/${tournament.id}/m/${m.id}`, text: "▶ " + t.liveManage }),
-        el("button.btn.btn-sm.btn-outline", { text: t.enterResult, onclick: () => resultModal(m) }),
-        el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => matchForm(state, m) }),
+        el("a.btn.btn-sm.btn-primary", { href: `#/t/${tournament.id}/m/${m.id}`,
+          text: (m.status === "finished" ? "✎ " + t.editMatchBtn : "▶ " + t.manageMatchBtn) }),
+        el("button.icon-btn", { text: "✎", title: t.editMatchInfo, onclick: () => matchForm(state, m) }),
         el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeMatch(m) }),
       ]));
     }
@@ -620,8 +620,10 @@ async function renderLiveConsole(tid, matchId) {
       currentMinute = minInput.value;
       close();
       try {
-        if (type === "goal") await api.addGoal(match, teamId, playerId, minute);
-        else await api.addCard(match, teamId, playerId, minute, type);
+        if (type === "goal") {
+          const teamGoals = (bundle.events || []).filter((e) => e.match_id === matchId && e.team_id === teamId && e.type === "goal").length;
+          await api.addGoal(match, teamId, playerId, minute, teamGoals);
+        } else await api.addCard(match, teamId, playerId, minute, type);
         toast(t.saved, "ok");
         await reload();
       } catch (e) { toast(e.message || t.errorGeneric, "err"); }
@@ -669,6 +671,11 @@ async function renderLiveConsole(tid, matchId) {
     });
   }
 
+  async function bump(isHome, delta) {
+    try { await api.bumpScore(match, isHome, delta); await reload(); }
+    catch (e) { toast(e.message || t.errorGeneric, "err"); }
+  }
+
   async function setStatus(status) {
     try {
       const patch = { status };
@@ -684,8 +691,20 @@ async function renderLiveConsole(tid, matchId) {
 
   async function delEvent(ev) {
     if (!(await confirmDialog(t.deleteEventQ))) return;
-    try { await api.removeEvent(ev, match); toast(t.deleted, "ok"); await reload(); }
+    const teamGoals = (bundle.events || []).filter((e) => e.match_id === matchId && e.team_id === ev.team_id && e.type === "goal").length;
+    try { await api.removeEvent(ev, match, teamGoals); toast(t.deleted, "ok"); await reload(); }
     catch (e) { toast(e.message || t.errorGeneric, "err"); }
+  }
+
+  function stepper(isHome, name, score) {
+    return el("div.lc-stepper", {}, [
+      el("div.lc-stepper-name", { text: name }),
+      el("div.lc-stepper-ctrl", {}, [
+        el("button.btn.lc-step", { type: "button", text: "－", "aria-label": "إنقاص", onclick: () => bump(isHome, -1) }),
+        el("span.lc-stepper-val", { text: String(score ?? 0) }),
+        el("button.btn.lc-step", { type: "button", text: "＋", "aria-label": "زيادة", onclick: () => bump(isHome, 1) }),
+      ]),
+    ]);
   }
 
   function sidePanel(teamId, side) {
@@ -749,6 +768,11 @@ async function renderLiveConsole(tid, matchId) {
           live ? el("span.badge.badge-live", {}, [el("span.dot"), t.live])
                : el("span.badge.badge-" + (match.status === "finished" ? "finished" : "upcoming"), { text: matchStatusLabel(match.status) }),
         ]),
+      ]),
+      // محرّر النتيجة المباشر (+/-)
+      el("div.lc-steppers", {}, [
+        stepper(true, home ? home.name : "—", match.home_score ?? 0),
+        stepper(false, away ? away.name : "—", match.away_score ?? 0),
       ]),
       minuteRow,
       el("div.lc-actions", {}, [sidePanel(match.home_team_id, "home"), sidePanel(match.away_team_id, "away")]),

@@ -298,13 +298,17 @@ async function createEvent(payload) {
   return { id: ref.id, ...payload };
 }
 
-// تسجيل هدف: ينشئ حدثاً ويزيد نتيجة الفريق المناسب، ويبدأ المباراة إن كانت مجدولة
-export async function addGoal(match, teamId, playerId, minute) {
+// تسجيل هدف بمُسجِّل. teamGoalEvents = عدد أهداف الفريق المُسجَّلة بأسماء حالياً.
+// إن كانت النتيجة أكبر من عدد المسجّلين (أهداف بلا اسم) => ننسب فقط دون زيادة النتيجة؛
+// وإلا فهو هدف جديد => نزيد النتيجة. هكذا يمكن تعديل مباراة منتهية دون مضاعفة النتيجة.
+export async function addGoal(match, teamId, playerId, minute, teamGoalEvents = 0) {
   const isHome = match.home_team_id === teamId;
-  const home = match.home_score ?? 0;
-  const away = match.away_score ?? 0;
-  // نُهيّئ الطرفين كأرقام ونزيد الطرف المسجِّل
-  const patch = isHome ? { home_score: home + 1, away_score: away } : { home_score: home, away_score: away + 1 };
+  const home = match.home_score ?? 0, away = match.away_score ?? 0;
+  const curScore = isHome ? home : away;
+  const patch = { home_score: home, away_score: away };
+  if (teamGoalEvents >= curScore) { // هدف جديد
+    if (isHome) patch.home_score = home + 1; else patch.away_score = away + 1;
+  }
   if (match.status === "scheduled") patch.status = "live";
   await updateMatch(match.id, patch);
   return createEvent({
@@ -321,12 +325,23 @@ export async function addCard(match, teamId, playerId, minute, type) {
   });
 }
 
-// حذف حدث؛ لو كان هدفاً نُنقص النتيجة
-export async function removeEvent(event, match) {
+// ضبط النتيجة مباشرةً (أزرار +/-)
+export async function bumpScore(match, isHome, delta) {
+  const home = match.home_score ?? 0, away = match.away_score ?? 0;
+  const patch = { home_score: home, away_score: away };
+  if (isHome) patch.home_score = Math.max(0, home + delta); else patch.away_score = Math.max(0, away + delta);
+  if (match.status === "scheduled" && delta > 0) patch.status = "live";
+  await updateMatch(match.id, patch);
+}
+
+// حذف حدث؛ لو كان هدفاً نُنقص النتيجة فقط إذا كانت كل الأهداف منسوبة (المسجّلون == النتيجة)
+export async function removeEvent(event, match, teamGoalEvents = 0) {
   if (event.type === "goal" && match) {
     const isHome = match.home_team_id === event.team_id;
     const cur = (isHome ? match.home_score : match.away_score) ?? 0;
-    await updateMatch(match.id, { [isHome ? "home_score" : "away_score"]: Math.max(0, cur - 1) });
+    if (teamGoalEvents >= cur) {
+      await updateMatch(match.id, { [isHome ? "home_score" : "away_score"]: Math.max(0, cur - 1) });
+    }
   }
   await deleteDoc(doc(requireDb(), "events", event.id));
 }

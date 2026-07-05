@@ -389,6 +389,14 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
 .lc-score { font-size: 2.6rem; font-weight: 800; font-variant-numeric: tabular-nums; display: flex; gap: 10px; align-items: center; }
 .lc-score .sep { opacity: .6; }
 .lc-status-badge { position: absolute; inset-block-start: 10px; inset-inline-end: 12px; }
+/* محرّر النتيجة (+/-) */
+.lc-steppers { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: -6px 0 14px; }
+.lc-stepper { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; text-align: center; box-shadow: var(--shadow-xs); }
+.lc-stepper-name { font-weight: 700; color: var(--ink); font-size: .86rem; margin-bottom: 8px; overflow-wrap: anywhere; }
+.lc-stepper-ctrl { display: flex; align-items: center; justify-content: center; gap: 12px; }
+.lc-step { width: 42px; height: 42px; min-height: 42px; padding: 0; font-size: 1.35rem; font-weight: 800; border-radius: 11px; }
+.lc-stepper-val { font-size: 1.7rem; font-weight: 900; color: var(--ink); font-variant-numeric: tabular-nums; min-width: 28px; }
+
 .lc-minute-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
 .lc-minute-row label { font-weight: 600; color: var(--text-2); }
 .minute-input { width: 92px; text-align: center; font-weight: 800; font-size: 1.05rem; }

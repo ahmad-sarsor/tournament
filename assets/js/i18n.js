@@ -181,6 +181,10 @@ export const t = {
 
   // إدارة مباشرة + أحداث
   liveManage: "إدارة مباشرة",
+  manageMatchBtn: "إدارة المباراة",
+  editMatchBtn: "تعديل المباراة",
+  editMatchInfo: "تعديل بيانات المباراة (الفرق/الوقت)",
+  scoreLabel: "النتيجة",
   liveConsole: "إدارة المباراة مباشرةً",
   currentMinute: "الدقيقة الحالية",
   minute: "الدقيقة",
