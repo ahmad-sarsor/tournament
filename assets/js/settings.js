@@ -2,8 +2,9 @@
 //  الإعدادات: المظهر (تلقائي/فاتح/داكن) + حجم الخطّ + تثبيت التطبيق
 //  تُطبَّق فوراً وتُحفظ في المتصفّح.
 // ============================================================================
-import { el, openModal } from "./util.js";
+import { el, openModal, toast } from "./util.js";
 import { t } from "./i18n.js";
+import { createSuggestion } from "./data.js";
 
 const KEY_THEME = "tp_theme";     // auto | light | dark
 const KEY_FONT = "tp_fontscale";  // 0.9 | 1 | 1.12 | 1.25
@@ -83,6 +84,7 @@ export function openSettings({ isAdmin = false } = {}) {
   }
 
   const footer = [];
+  if (!isAdmin) footer.push(el("button.btn.btn-outline.btn-block", { type: "button", text: "💡 " + t.suggestBox, onclick: openSuggestionModal }));
   if (!isAdmin) footer.push(el("a.btn.btn-outline.btn-block", { href: "./admin.html", text: "🔒 " + t.organizerPanel }));
 
   openModal({
@@ -92,6 +94,38 @@ export function openSettings({ isAdmin = false } = {}) {
       el("p.set-hint", { text: t.settingsHint }),
       ...(footer.length ? [el("div", { style: "margin-top:14px" }, footer)] : []),
     ]),
+  });
+}
+
+// نافذة صندوق الاقتراحات (متاحة لأي زائر) — تُخزَّن في Firestore ويطّلع عليها المدير
+export function openSuggestionModal() {
+  const name = el("input.input", { type: "text", maxlength: "80", placeholder: t.suggestNamePlaceholder, autocomplete: "name" });
+  const text = el("textarea.input", { rows: "5", maxlength: "1000", required: true, placeholder: t.suggestTextPlaceholder });
+  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
+  const send = el("button.btn.btn-primary.btn-block", { type: "submit", text: t.suggestSend });
+
+  const form = el("form", {}, [
+    el("div.field", {}, [el("label", { text: t.suggestName }), name]),
+    el("div.field", {}, [el("label", { text: t.suggestText }), text]),
+    err, send,
+  ]);
+
+  const close = openModal({ title: "💡 " + t.suggestBox, body: form });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const val = text.value.trim();
+    if (!val) { err.hidden = false; err.textContent = t.suggestEmpty; return; }
+    err.hidden = true; send.disabled = true; send.textContent = t.loading;
+    try {
+      await createSuggestion({ text: val, name: name.value.trim() || undefined, context: location.hash || undefined });
+      close();
+      toast(t.suggestThanks, "ok");
+    } catch (err2) {
+      console.error(err2);
+      err.hidden = false; err.textContent = t.suggestError;
+      send.disabled = false; send.textContent = t.suggestSend;
+    }
   });
 }
 

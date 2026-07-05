@@ -27,6 +27,20 @@ export const t = {
   noMatches: "لا توجد مباريات بعد",
   jumpToday: "اليوم",
 
+  // صندوق الاقتراحات
+  suggestBox: "صندوق الاقتراحات",
+  suggestName: "اسمك (اختياري)",
+  suggestNamePlaceholder: "اسمك",
+  suggestText: "اقتراحك",
+  suggestTextPlaceholder: "اكتب اقتراحك أو ملاحظتك هنا…",
+  suggestSend: "إرسال الاقتراح",
+  suggestThanks: "شكراً لك! وصلنا اقتراحك.",
+  suggestEmpty: "اكتب اقتراحاً أولاً",
+  suggestError: "تعذّر الإرسال، حاول مرة أخرى لاحقاً",
+  suggestions: "الاقتراحات",
+  noSuggestions: "لا توجد اقتراحات بعد",
+  anonymousVisitor: "زائر",
+
   // الترتيب
   th_rank: "#",
   th_team: "الفريق",

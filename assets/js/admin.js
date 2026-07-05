@@ -47,6 +47,7 @@ function renderUserBox() {
 
 function parseHash() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (parts[0] === "suggestions") return { view: "suggestions" };
   if (parts[0] === "t" && parts[1]) {
     if (parts[2] === "m" && parts[3]) return { view: "live", id: parts[1], matchId: parts[3] };
     return { view: "tournament", id: parts[1], tab: parts[2] || "details" };
@@ -63,6 +64,7 @@ async function route() {
     mount(app, spinner());
     if (r.view === "live") await renderLiveConsole(r.id, r.matchId);
     else if (r.view === "tournament") await renderTournamentAdmin(r.id, r.tab);
+    else if (r.view === "suggestions") await renderSuggestionsAdmin();
     else await renderHome();
   } catch (e) { console.error(e); renderError(e); }
 }
@@ -119,7 +121,10 @@ async function renderHome() {
   const tournaments = await api.fetchTournaments();
   const head = el("div.page-head", { style: "display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap" }, [
     el("div", {}, [el("h1.page-title", { text: t.tournaments }), el("p.page-sub", { text: "إدارة كل البطولات" })]),
-    el("button.btn.btn-primary", { text: "＋ " + t.newTournament, onclick: () => tournamentForm(null) }),
+    el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, [
+      el("a.btn.btn-outline", { href: "#/suggestions", text: "💡 " + t.suggestions }),
+      el("button.btn.btn-primary", { text: "＋ " + t.newTournament, onclick: () => tournamentForm(null) }),
+    ]),
   ]);
   const list = el("div");
   if (!tournaments.length) list.appendChild(emptyState("🏆", "لا توجد بطولات بعد — أنشئ بطولتك الأولى"));
@@ -140,6 +145,42 @@ async function renderHome() {
 async function removeTournament(tr) {
   if (!(await confirmDialog(`حذف البطولة «${tr.name}» وكل بياناتها؟ ${t.confirmDelete}`))) return;
   try { await api.deleteTournament(tr.id); toast(t.deleted, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// ---- الاقتراحات (صندوق الزوّار) --------------------------------------------
+
+function fmtWhen(ms) {
+  if (!ms) return "";
+  const d = new Date(ms);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function renderSuggestionsAdmin() {
+  const items = await api.fetchSuggestions();
+  const head = el("div.page-head", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" }, [
+    el("a.btn.btn-sm.btn-outline", { href: "#/", text: "→ " + t.tournaments }),
+    el("h1.page-title", { style: "margin:0", text: "💡 " + t.suggestions }),
+    el("span.page-sub", { text: `(${items.length})` }),
+  ]);
+  const list = el("div");
+  if (!items.length) list.appendChild(emptyState("💡", t.noSuggestions));
+  for (const s of items) {
+    list.appendChild(el("div.admin-list-item", {}, [
+      el("div.grow", {}, [
+        el("div", { style: "white-space:pre-wrap;font-weight:600", text: s.text }),
+        el("div.sub", { text: [s.name || t.anonymousVisitor, fmtWhen(s.created_at)].filter(Boolean).join(" · ") }),
+      ]),
+      el("button.btn.btn-sm.btn-danger", { text: t.delete, onclick: () => removeSuggestion(s) }),
+    ]));
+  }
+  mount(app, head, list);
+}
+
+async function removeSuggestion(s) {
+  if (!(await confirmDialog(`حذف هذا الاقتراح؟ ${t.confirmDelete}`))) return;
+  try { await api.deleteSuggestion(s.id); toast(t.deleted, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 

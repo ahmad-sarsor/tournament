@@ -25,12 +25,30 @@ service cloud.firestore {
         && request.auth.token.email in adminEmails();
     }
 
+    // اقتراح صالح للإضافة من الزائر (بلا تسجيل): نص إلزامي ومحدود الطول،
+    // ولا يُسمح إلا بالحقول المعروفة (منعاً للعبث).
+    function isValidSuggestion() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['text', 'name', 'context', 'created_at'])
+        && d.text is string && d.text.size() >= 1 && d.text.size() <= 1000
+        && (!('name' in d)    || (d.name is string && d.name.size() <= 80))
+        && (!('context' in d) || (d.context is string && d.context.size() <= 200))
+        && (!('created_at' in d) || d.created_at is number);
+    }
+
     match /tournaments/{id} { allow read: if true; allow write: if isAdmin(); }
     match /groups/{id}      { allow read: if true; allow write: if isAdmin(); }
     match /teams/{id}       { allow read: if true; allow write: if isAdmin(); }
     match /matches/{id}     { allow read: if true; allow write: if isAdmin(); }
     match /players/{id}     { allow read: if true; allow write: if isAdmin(); }
     match /events/{id}      { allow read: if true; allow write: if isAdmin(); }
+
+    // صندوق الاقتراحات: الزائر يضيف فقط (بلا قراءة)، والمدير يقرأ ويحذف.
+    match /suggestions/{id} {
+      allow create: if isValidSuggestion();
+      allow read, delete: if isAdmin();
+      allow update: if false;
+    }
 
     // أي مجموعة أخرى: ممنوعة افتراضياً
     match /{document=**} { allow read, write: if false; }

@@ -291,6 +291,30 @@ export async function deletePlayer(id) {
   await deleteDoc(doc(requireDb(), "players", id));
 }
 
+// ---- صندوق الاقتراحات (إضافة عامّة للزوّار، قراءة/حذف للمدير) ----------------
+
+// يضيفها أي زائر بلا تسجيل — القاعدة في firestore.rules تتحقّق من الصلاحية
+export async function createSuggestion({ text, name, context } = {}) {
+  const payload = clean({
+    text: String(text || "").trim().slice(0, 1000),
+    name: name ? String(name).trim().slice(0, 80) : undefined,
+    context: context ? String(context).slice(0, 200) : undefined,
+    created_at: Date.now(),
+  });
+  const ref = await addDoc(collection(requireDb(), "suggestions"), payload);
+  return { id: ref.id, ...payload };
+}
+
+// للمدير فقط: أحدث الاقتراحات أولاً
+export async function fetchSuggestions() {
+  const snap = await getDocs(collection(requireDb(), "suggestions"));
+  return mapDocs(snap).sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+}
+
+export async function deleteSuggestion(id) {
+  await deleteDoc(doc(requireDb(), "suggestions", id));
+}
+
 // ---- أحداث المباراة (أهداف/إنذارات) + مزامنة النتيجة ------------------------
 
 async function createEvent(payload) {
