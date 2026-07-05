@@ -462,14 +462,6 @@ function renderSchedule(state) {
   }
   wrap.appendChild(listHost);
 
-  // زر عائم للرجوع إلى «اليوم» (المِرساة) — يظهر فقط عند وجود مباريات مجدولة
-  if (pickAnchorDate(bundle.matches)) {
-    wrap.appendChild(el("button.jump-today", {
-      type: "button", title: t.jumpToday, "aria-label": t.jumpToday,
-      onclick: () => scrollToDay(listHost, pickAnchorDate(currentMatches()), "smooth"),
-    }, [el("span.jt-ico", { text: "📍" }), el("span.jt-txt", { text: t.jumpToday })]));
-  }
-
   // تمرير تلقائي عند فتح التبويب فقط (لا مع التحديث اللحظي الذي يعيد الرسم)
   rerenderList(consumeAnchorPending());
   return wrap;

@@ -172,19 +172,6 @@ img { max-width: 100%; }
 /* هامش عند التمرير التلقائي إلى يوم، حتى لا يختبئ عنوانه خلف الترويسة الثابتة */
 .day-group { scroll-margin-top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + 14px); }
 
-/* زر عائم: العودة إلى «اليوم» في برنامج المباريات */
-.jump-today {
-  position: fixed; inset-block-end: calc(20px + env(safe-area-inset-bottom, 0px));
-  inset-inline-start: 16px; z-index: 50;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 10px 15px; border: 1px solid var(--border); border-radius: 999px;
-  background: var(--surface); color: var(--ink); font-weight: 700; font-size: .86rem;
-  box-shadow: var(--shadow-md); cursor: pointer; transition: transform .15s, box-shadow .15s;
-}
-.jump-today:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
-.jump-today:active { transform: translateY(0); }
-.jump-today .jt-ico { font-size: 1rem; line-height: 1; }
-@media print { .jump-today { display: none !important; } }
 .day-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 12px; font-weight: 700; font-size: .95rem; color: var(--ink); }
 .day-head .date { color: var(--text-3); font-weight: 600; font-size: .8rem; }
 .day-head .line { flex: 1; height: 1px; background: var(--border); }

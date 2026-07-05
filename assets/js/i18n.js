@@ -25,7 +25,6 @@ export const t = {
   live: "مباشر",
   vs: "×",
   noMatches: "لا توجد مباريات بعد",
-  jumpToday: "اليوم",
 
   // صندوق الاقتراحات
   suggestBox: "صندوق الاقتراحات",
