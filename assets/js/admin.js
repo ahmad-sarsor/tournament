@@ -137,7 +137,8 @@ function renderSetupNeeded() {
 function renderLogin() {
   clear(userBox);
   const host = el("div", { style: "max-width:400px;margin:6vh auto 0" });
-  let mode = "login"; // login | signup
+  // نبدأ بنموذج التسجيل عند القدوم من زر «دخول / تسجيل» في رأس الموقع (#/register)
+  let mode = /register|signup/i.test(location.hash) ? "signup" : "login"; // login | signup
 
   const build = () => {
     const isSignup = mode === "signup";

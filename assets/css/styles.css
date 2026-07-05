@@ -112,6 +112,12 @@ img { max-width: 100%; }
   padding: 7px 14px; border-radius: 9px; transition: .15s;
 }
 .header-link:hover { color: var(--ink); background: var(--surface-2); }
+.header-auth {
+  display: inline-flex; align-items: center; white-space: nowrap;
+  padding: 7px 14px; border-radius: 10px; border: 1px solid var(--brand);
+  color: var(--brand); background: transparent; font-weight: 700; font-size: .85rem; transition: .15s;
+}
+.header-auth:hover { background: var(--brand); color: #fff; }
 
 /* التخطيط ------------------------------------------------------------------ */
 .container { max-width: var(--maxw); margin: 0 auto; padding: 26px 18px 72px; }
