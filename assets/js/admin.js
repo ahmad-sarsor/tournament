@@ -26,10 +26,12 @@ async function boot() {
   if (!isConfigured) return renderSetupNeeded();
   try { session = await api.getSession(); } catch (e) { console.error(e); }
   await refreshRole();
-  api.onAuthChange(async (s) => { session = s; await refreshRole(); renderUserBox(); route(); });
+  api.onAuthChange(async (s) => { session = s; await refreshRole(); renderUserBox(); route(); autoFinishStale(); });
   window.addEventListener("hashchange", route);
   renderUserBox();
   route();
+  autoFinishStale();                                   // فحص فوري عند الفتح
+  setInterval(autoFinishStale, AUTO_FINISH_CHECK_MS);  // فحص دوري ما دامت اللوحة مفتوحة
 }
 boot();
 
@@ -39,6 +41,30 @@ async function refreshRole() {
   isOwnerUser = api.isOwnerEmail(session.user.email);
   try { isAdminUser = isOwnerUser || await api.amIAdmin(); }
   catch { isAdminUser = isOwnerUser; }
+}
+
+// ---- إنهاء تلقائي للمباريات المنسيّة (بعد ساعة من بدئها) --------------------
+const AUTO_FINISH_MS = 60 * 60 * 1000;       // ساعة من لحظة البدء
+const AUTO_FINISH_CHECK_MS = 3 * 60 * 1000;  // نفحص كل ٣ دقائق (توفيراً للحصّة)
+let autoFinishing = false;
+
+async function autoFinishStale() {
+  if (!isAdminUser || autoFinishing) return;   // يكتب المدير فقط، ولا فحصين متزامنين
+  autoFinishing = true;
+  try {
+    const now = Date.now();
+    for (const m of await api.fetchLiveMatches()) {
+      if (m.status === "live" && m.live_started_at && now - m.live_started_at >= AUTO_FINISH_MS) {
+        await api.updateMatch(m.id, {
+          status: "finished",
+          home_score: m.home_score ?? 0,
+          away_score: m.away_score ?? 0,
+          live_started_at: null,
+        });
+      }
+    }
+  } catch (e) { console.error(e); }
+  finally { autoFinishing = false; }
 }
 
 function renderUserBox() {

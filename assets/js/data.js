@@ -312,12 +312,24 @@ export async function deleteTeam(id) {
 }
 
 export async function createMatch(p) {
-  const ref = await addDoc(collection(requireDb(), "matches"), clean(p));
-  return { id: ref.id, ...p };
+  const data = { ...p };
+  // ختم لحظة البدء عند إنشاء مباراة مباشرة مباشرةً (نادر لكن للاكتمال)
+  if (data.status === "live" && data.live_started_at === undefined) data.live_started_at = Date.now();
+  const ref = await addDoc(collection(requireDb(), "matches"), clean(data));
+  return { id: ref.id, ...data };
 }
 export async function updateMatch(id, patch) {
-  await updateDoc(doc(requireDb(), "matches", id), clean(patch));
-  return { id, ...patch };
+  const p = { ...patch };
+  // عند أي انتقال إلى «مباشر» نختم لحظة البدء (يغطّي زر البدء، إعادة الفتح، أول هدف، نموذج التعديل)
+  if (p.status === "live" && p.live_started_at === undefined) p.live_started_at = Date.now();
+  await updateDoc(doc(requireDb(), "matches", id), clean(p));
+  return { id, ...p };
+}
+
+// المباريات المباشرة حالياً (لفحص الإنهاء التلقائي في لوحة الإدارة)
+export async function fetchLiveMatches() {
+  const snap = await getDocs(query(collection(requireDb(), "matches"), where("status", "==", "live")));
+  return mapDocs(snap);
 }
 export async function deleteMatch(id) {
   await deleteWhere("events", "match_id", id);
