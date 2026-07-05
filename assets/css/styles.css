@@ -505,10 +505,10 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
   .mp-lineups { grid-template-columns: 1fr; }
   .mp-score { font-size: 2.2rem; }
   .mp-team-name { font-size: 1.02rem; }
-  table.standings tbody td, table.standings thead th { padding: 9px 5px; }
+  table.standings tbody td, table.standings thead th { padding: 8px 1px; }
+  table.standings th.team-col, table.standings td.team-col { padding-inline-start: 4px; }
   .page-title { font-size: 1.4rem; }
   .row-2 { grid-template-columns: 1fr; }
-  table.standings { min-width: 560px; }
   .lc-score { font-size: 2.1rem; }
   .lc-team { font-size: .95rem; }
   .admin-list-item { flex-wrap: wrap; }
