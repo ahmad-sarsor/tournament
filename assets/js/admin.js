@@ -11,6 +11,7 @@ import { openSettings, applyPrefs } from "./settings.js";
 const app = document.getElementById("app");
 const userBox = document.getElementById("user-box");
 let session = null;
+let isAdminUser = false, isOwnerUser = false; // دور المستخدم الحالي (يُحدَّث مع كل تغيّر مصادقة)
 let uid = 0; // عدّاد لتوليد معرّفات فريدة لحقول النماذج (ربط label بالحقل)
 let adminUnsub = null; // اشتراك التحديث اللحظي (للوحة الإدارة المباشرة)
 function cleanupAdmin() { if (adminUnsub) { adminUnsub(); adminUnsub = null; } }
@@ -24,12 +25,21 @@ document.getElementById("settings-btn")?.addEventListener("click", () => openSet
 async function boot() {
   if (!isConfigured) return renderSetupNeeded();
   try { session = await api.getSession(); } catch (e) { console.error(e); }
-  api.onAuthChange((s) => { session = s; renderUserBox(); route(); });
+  await refreshRole();
+  api.onAuthChange(async (s) => { session = s; await refreshRole(); renderUserBox(); route(); });
   window.addEventListener("hashchange", route);
   renderUserBox();
   route();
 }
 boot();
+
+// يحسب دور المستخدم الحالي (مالك/مدير) بعد كل تغيّر في المصادقة
+async function refreshRole() {
+  if (!session) { isAdminUser = false; isOwnerUser = false; return; }
+  isOwnerUser = api.isOwnerEmail(session.user.email);
+  try { isAdminUser = isOwnerUser || await api.amIAdmin(); }
+  catch { isAdminUser = isOwnerUser; }
+}
 
 function renderUserBox() {
   clear(userBox);
@@ -47,6 +57,7 @@ function renderUserBox() {
 
 function parseHash() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (parts[0] === "users") return { view: "users" };
   if (parts[0] === "suggestions") return { view: "suggestions" };
   if (parts[0] === "t" && parts[1]) {
     if (parts[2] === "m" && parts[3]) return { view: "live", id: parts[1], matchId: parts[3] };
@@ -59,14 +70,29 @@ async function route() {
   cleanupAdmin();
   if (!isConfigured) return renderSetupNeeded();
   if (!session) return renderLogin();
+  if (!isAdminUser) return renderPending();          // مسجَّل لكن بلا صلاحية بعد
   const r = parseHash();
   try {
     mount(app, spinner());
     if (r.view === "live") await renderLiveConsole(r.id, r.matchId);
     else if (r.view === "tournament") await renderTournamentAdmin(r.id, r.tab);
     else if (r.view === "suggestions") await renderSuggestionsAdmin();
+    else if (r.view === "users") await renderUsersAdmin();
     else await renderHome();
   } catch (e) { console.error(e); renderError(e); }
+}
+
+// شاشة «بانتظار الموافقة» لمن سجّل ولم يُمنح صلاحية بعد
+function renderPending() {
+  const email = session?.user?.email || "";
+  mount(app, el("div", { style: "max-width:440px;margin:8vh auto 0;text-align:center" }, [
+    el("div.page-head", {}, [el("h1.page-title", { text: "⏳ " + t.pendingTitle })]),
+    el("div.card.card-pad", {}, [
+      el("p", { style: "margin:0 0 8px", text: t.pendingBody }),
+      el("p.page-sub", { style: "margin:0 0 16px", text: email }),
+      el("button.btn.btn-outline.btn-block", { type: "button", text: t.logout, onclick: async () => { await api.signOut(); } }),
+    ]),
+  ]));
 }
 
 function renderError(err) {
@@ -84,35 +110,55 @@ function renderSetupNeeded() {
 
 function renderLogin() {
   clear(userBox);
-  const email = el("input.input", { id: "login-email", type: "email", autocomplete: "username", required: true });
-  const pass = el("input.input", { id: "login-pass", type: "password", autocomplete: "current-password", required: true });
-  const errBox = el("div.alert.alert-error", { hidden: true, role: "alert" });
-  const btn = el("button.btn.btn-primary.btn-block", { type: "submit", text: t.login });
+  const host = el("div", { style: "max-width:400px;margin:6vh auto 0" });
+  let mode = "login"; // login | signup
 
-  const form = el("form", {}, [
-    el("div.field", {}, [el("label", { text: t.email, for: "login-email" }), email]),
-    el("div.field", {}, [el("label", { text: t.password, for: "login-pass" }), pass]),
-    errBox, btn,
-  ]);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    errBox.hidden = true; btn.disabled = true; btn.textContent = t.loading;
-    try {
-      await api.signIn(email.value.trim(), pass.value);
-      // onAuthChange سيتكفّل بإعادة التوجيه
-    } catch (err) {
-      errBox.hidden = false; errBox.textContent = t.loginError;
-      btn.disabled = false; btn.textContent = t.login;
-    }
-  });
+  const build = () => {
+    const isSignup = mode === "signup";
+    const name = el("input.input", { id: "reg-name", type: "text", autocomplete: "name", maxlength: "60", placeholder: t.usernamePlaceholder });
+    const email = el("input.input", { id: "login-email", type: "email", autocomplete: "username", required: true });
+    const pass = el("input.input", { id: "login-pass", type: "password", autocomplete: isSignup ? "new-password" : "current-password", required: true });
+    const errBox = el("div.alert.alert-error", { hidden: true, role: "alert" });
+    const btn = el("button.btn.btn-primary.btn-block", { type: "submit", text: isSignup ? t.signUp : t.login });
 
-  mount(app, el("div", { style: "max-width:400px;margin:6vh auto 0" }, [
-    el("div.page-head", { style: "text-align:center" }, [
-      el("h1.page-title", { text: t.adminPanel }),
-      el("p.page-sub", { text: t.loginPrompt }),
-    ]),
-    el("div.card.card-pad", {}, [form]),
-  ]));
+    const fields = [];
+    if (isSignup) fields.push(el("div.field", {}, [el("label", { text: t.username, for: "reg-name" }), name]));
+    fields.push(el("div.field", {}, [el("label", { text: t.email, for: "login-email" }), email]));
+    fields.push(el("div.field", {}, [el("label", { text: t.password, for: "login-pass" }), pass]));
+    fields.push(errBox, btn);
+    const form = el("form", {}, fields);
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      errBox.hidden = true; btn.disabled = true; btn.textContent = t.loading;
+      try {
+        if (isSignup) await api.signUp(email.value.trim(), pass.value, name.value.trim());
+        else await api.signIn(email.value.trim(), pass.value);
+        // onAuthChange سيتكفّل بإعادة التوجيه
+      } catch (err) {
+        errBox.hidden = false; errBox.textContent = isSignup ? t.signupError : t.loginError;
+        btn.disabled = false; btn.textContent = isSignup ? t.signUp : t.login;
+      }
+    });
+
+    const toggle = el("button.btn.btn-block", {
+      type: "button", style: "background:transparent;border:0;color:var(--brand);margin-top:8px;font-weight:600",
+      text: isSignup ? t.haveAccount : t.noAccount,
+      onclick: () => { mode = isSignup ? "login" : "signup"; build(); },
+    });
+
+    mount(host,
+      el("div.page-head", { style: "text-align:center" }, [
+        el("h1.page-title", { text: t.adminPanel }),
+        el("p.page-sub", { text: isSignup ? "" : t.loginPrompt }),
+      ]),
+      el("div.card.card-pad", {}, [form]),
+      toggle,
+    );
+  };
+
+  build();
+  mount(app, host);
 }
 
 // ---- الصفحة الرئيسية للإدارة -----------------------------------------------
@@ -122,6 +168,7 @@ async function renderHome() {
   const head = el("div.page-head", { style: "display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap" }, [
     el("div", {}, [el("h1.page-title", { text: t.tournaments }), el("p.page-sub", { text: "إدارة كل البطولات" })]),
     el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, [
+      isOwnerUser ? el("a.btn.btn-outline", { href: "#/users", text: "👥 " + t.usersAdmin }) : null,
       el("a.btn.btn-outline", { href: "#/suggestions", text: "💡 " + t.suggestions }),
       el("button.btn.btn-primary", { text: "＋ " + t.newTournament, onclick: () => tournamentForm(null) }),
     ]),
@@ -181,6 +228,43 @@ async function renderSuggestionsAdmin() {
 async function removeSuggestion(s) {
   if (!(await confirmDialog(`حذف هذا الاقتراح؟ ${t.confirmDelete}`))) return;
   try { await api.deleteSuggestion(s.id); toast(t.deleted, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// ---- المستخدمون والمدراء (المالك فقط) --------------------------------------
+
+async function renderUsersAdmin() {
+  if (!isOwnerUser) return renderHome();             // حماية إضافية (القواعد تفرضها أيضاً)
+  const [users, adminSet] = await Promise.all([api.fetchUsers(), api.fetchAdminEmails()]);
+  const head = el("div.page-head", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" }, [
+    el("a.btn.btn-sm.btn-outline", { href: "#/", text: "→ " + t.tournaments }),
+    el("h1.page-title", { style: "margin:0", text: "👥 " + t.usersAdmin }),
+    el("span.page-sub", { text: `(${users.length})` }),
+  ]);
+  const list = el("div");
+  if (!users.length) list.appendChild(emptyState("👥", t.noUsers));
+  for (const u of users) {
+    const owner = api.isOwnerEmail(u.email);
+    const admin = owner || adminSet.has(u.email);
+    const roleLabel = owner ? t.roleOwner : (admin ? t.roleAdmin : t.roleUser);
+    const roleCls = owner ? "badge-finished" : (admin ? "badge-active" : "badge-upcoming");
+    list.appendChild(el("div.admin-list-item", {}, [
+      el("div.grow", {}, [
+        el("div", { style: "font-weight:700", text: u.name || u.email }),
+        el("div.sub", { text: u.email }),
+      ]),
+      el("span.badge." + roleCls, { text: roleLabel }),
+      owner ? null : (admin
+        ? el("button.btn.btn-sm.btn-danger", { text: t.removeAdminRole, onclick: () => toggleAdmin(u, false) })
+        : el("button.btn.btn-sm.btn-primary", { text: t.makeAdmin, onclick: () => toggleAdmin(u, true) })),
+    ]));
+  }
+  mount(app, head, list);
+}
+
+async function toggleAdmin(u, on) {
+  if (!on && !(await confirmDialog(`إزالة صلاحية الإدارة عن «${u.name || u.email}»؟`))) return;
+  try { await api.setAdmin(u.email, on); toast(t.saved, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 

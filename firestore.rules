@@ -14,15 +14,22 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ✍️ بريد/بُرد المديرين (يجب أن يطابق مستخدم Firebase Authentication)
-    function adminEmails() {
+    // ✍️ بريد/بُرد «المالك»: الوحيد القادر على تعيين/إزالة المدراء (super-admin)
+    function ownerEmails() {
       return ['ahmad.kefah11sar@gmail.com'];
     }
 
-    function isAdmin() {
+    function isOwner() {
       return request.auth != null
         && request.auth.token.email != null
-        && request.auth.token.email in adminEmails();
+        && request.auth.token.email in ownerEmails();
+    }
+
+    // مدير = المالك، أو بريده مُسجَّل في مجموعة admins (يعيّنه المالك من لوحة الإدارة)
+    function isAdmin() {
+      return isOwner()
+        || (request.auth != null && request.auth.token.email != null
+            && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)));
     }
 
     // اقتراح صالح للإضافة من الزائر (بلا تسجيل): نص إلزامي ومحدود الطول،
@@ -48,6 +55,23 @@ service cloud.firestore {
       allow create: if isValidSuggestion();
       allow read, delete: if isAdmin();
       allow update: if false;
+    }
+
+    // المسجّلون: كل مستخدم ينشئ/يعدّل وثيقته الخاصّة عند التسجيل، والمدير يقرأ القائمة.
+    match /users/{uid} {
+      allow read: if isAdmin();
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['email', 'name', 'created_at'])
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+      allow delete: if isOwner();
+    }
+
+    // المدراء: المالك وحده يعيّن/يزيل. ويُسمح للمستخدم بقراءة وثيقته هو فقط (لمعرفة حالته).
+    match /admins/{email} {
+      allow read: if isAdmin()
+        || (request.auth != null && request.auth.token.email == email);
+      allow write: if isOwner();
     }
 
     // أي مجموعة أخرى: ممنوعة افتراضياً

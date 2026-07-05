@@ -40,6 +40,24 @@ export const t = {
   noSuggestions: "لا توجد اقتراحات بعد",
   anonymousVisitor: "زائر",
 
+  // التسجيل وإدارة المدراء
+  signUp: "إنشاء حساب",
+  username: "اسم المستخدم",
+  usernamePlaceholder: "اسمك الذي يظهر للمالك",
+  haveAccount: "لديك حساب؟ تسجيل الدخول",
+  noAccount: "ليس لديك حساب؟ أنشئ حساباً",
+  signupError: "تعذّر إنشاء الحساب (قد يكون البريد مستخدماً أو كلمة المرور ضعيفة)",
+  pendingTitle: "بانتظار الموافقة",
+  pendingBody: "تمّ تسجيل حسابك بنجاح. لا تملك صلاحية الإدارة بعد — بانتظار أن يمنحك مالك المنصّة الصلاحية.",
+  usersAdmin: "المستخدمون",
+  registeredUsers: "المسجّلون",
+  noUsers: "لا يوجد مستخدمون مسجَّلون بعد",
+  makeAdmin: "تعيين مديراً",
+  removeAdminRole: "إزالة الإدارة",
+  roleOwner: "المالك",
+  roleAdmin: "مدير",
+  roleUser: "مستخدم",
+
   // الترتيب
   th_rank: "#",
   th_team: "الفريق",

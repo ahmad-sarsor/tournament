@@ -15,3 +15,6 @@ export const firebaseConfig = {
 
 // اسم المنصّة (يظهر في الرأس)
 export const SITE_NAME = "منصّة البطولات";
+
+// بريد/بُرد «المالك»: الوحيد القادر على تعيين/إزالة المدراء (يطابق ownerEmails في firestore.rules)
+export const OWNER_EMAILS = ["ahmad.kefah11sar@gmail.com"];

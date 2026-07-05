@@ -3,12 +3,14 @@
 //  الأسماء المُصدَّرة ثابتة كي تبقى بقية الواجهة كما هي.
 // ============================================================================
 import { db, auth } from "./firebase.js";
+import { OWNER_EMAILS } from "./config.js";
 import {
   collection, doc, getDoc, getDocs, query, where,
-  addDoc, updateDoc, deleteDoc, writeBatch, onSnapshot,
+  addDoc, setDoc, updateDoc, deleteDoc, writeBatch, onSnapshot,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
-  signInWithEmailAndPassword, signOut as fbSignOut, onAuthStateChanged,
+  signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
+  signOut as fbSignOut, onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
 
@@ -178,11 +180,57 @@ export async function signIn(email, password) {
   return { user: cred.user };
 }
 
+// تسجيل جديد: إنشاء حساب + حفظ اسم المستخدم في مجموعة users (يظهر للمالك ليمنحه الإدارة)
+export async function signUp(email, password, name) {
+  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  const displayName = (name || "").trim().slice(0, 60);
+  try { if (displayName) await updateProfile(cred.user, { displayName }); } catch {}
+  await setDoc(doc(requireDb(), "users", cred.user.uid), clean({
+    email: cred.user.email,
+    name: displayName || cred.user.email || "",
+    created_at: Date.now(),
+  }));
+  return { user: cred.user };
+}
+
 export async function signOut() { if (auth) await fbSignOut(auth); }
 
 export function onAuthChange(cb) {
   authCbs.add(cb);
   return () => authCbs.delete(cb);
+}
+
+// ---- إدارة المدراء (المالك فقط) -------------------------------------------
+
+export function isOwnerEmail(email) {
+  const e = String(email || "").toLowerCase();
+  return OWNER_EMAILS.some((o) => String(o).toLowerCase() === e);
+}
+
+// هل المستخدم الحالي مدير؟ (المالك دائماً، أو بريده في admins). قراءة وثيقته مسموحة بالقواعد.
+export async function amIAdmin() {
+  const u = currentUser;
+  if (!u || !u.email) return false;
+  if (isOwnerEmail(u.email)) return true;
+  try { return (await getDoc(doc(requireDb(), "admins", u.email))).exists(); }
+  catch { return false; }
+}
+
+export async function fetchUsers() {
+  const snap = await getDocs(collection(requireDb(), "users"));
+  return mapDocs(snap).sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
+}
+
+export async function fetchAdminEmails() {
+  const snap = await getDocs(collection(requireDb(), "admins"));
+  return new Set(snap.docs.map((d) => d.id));
+}
+
+// تعيين/إزالة مدير — المفتاح هو البريد كما هو (يطابق token.email للمستخدم)
+export async function setAdmin(email, on) {
+  const ref = doc(requireDb(), "admins", email);
+  if (on) await setDoc(ref, clean({ email, added_at: Date.now() }));
+  else await deleteDoc(ref);
 }
 
 // ---- الكتابة (محمية بقواعد الأمان) ----------------------------------------
