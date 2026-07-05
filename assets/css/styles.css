@@ -545,3 +545,83 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
   .admin-list-item { flex-wrap: wrap; }
   .admin-list-item .grow { flex-basis: 100%; }
 }
+
+/* ============================================================================
+   المصادقة الموسّعة: دخول Google، فاصل «أو»، إظهار كلمة المرور، تأكيد البريد
+   ========================================================================== */
+
+/* فاصل «أو» بين دخول Google والنموذج */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  color: var(--text-3);
+  font-size: .85rem;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* زر «المتابعة بحساب Google» */
+.btn-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1.5px solid var(--border-2);
+  font-weight: 600;
+}
+.btn-google:hover { background: var(--surface-2); }
+.btn-google svg { flex: 0 0 auto; }
+
+/* حقل كلمة المرور مع زر الإظهار/الإخفاء */
+.pw-wrap { position: relative; }
+.pw-wrap .input { padding-inline-end: 44px; }
+.pw-toggle {
+  position: absolute;
+  inset-inline-end: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 6px;
+  color: var(--text-3);
+}
+.pw-toggle:hover { color: var(--ink); }
+
+/* تلميح أسفل الحقل (مثل «٨ أحرف على الأقل») */
+.field-hint {
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: .82rem;
+}
+
+/* رابط نصّي خفيف («نسيت كلمة المرور؟») */
+.link-btn {
+  background: transparent;
+  border: 0;
+  color: var(--brand);
+  cursor: pointer;
+  font-size: .85rem;
+  font-weight: 600;
+  padding: 0;
+}
+.link-btn:hover { text-decoration: underline; }
+
+/* رمز شاشة تأكيد البريد */
+.verify-hero {
+  text-align: center;
+  padding: 26px 0 6px;
+  font-size: 3rem;
+  line-height: 1;
+}

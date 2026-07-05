@@ -1,22 +1,37 @@
 rules_version = '2';
 
 // ============================================================================
-//  قواعد أمان Firestore — نموذج متعدّد المستأجرين
+//  قواعد أمان Firestore — نموذج متعدّد المستأجرين (v2)
+//
 //  الأدوار:
-//   • المالك (owner): مثبَّت أدناه. كل الصلاحيات + اعتماد الأعضاء ومنح مدراء المنصّة.
-//   • مدير منصّة (platform admin): في admins/{email} — يعدّل كل التورنيرات. يمنحه المالك.
-//   • عضو معتمَد (member): في members/{email} — يُنشئ تورنيرات ويملكها. يعتمده المالك.
-//   • مدير تورنير: بريده في admin_emails للتورنير — يعدّل ذلك التورنير فقط.
-//   القراءة عامّة (عرض للزوّار). النشر: Firebase Console → Firestore → Rules → Publish
+//   • المالك (owner): مثبَّت أدناه (بحروف صغيرة). كل الصلاحيات + اعتماد الأعضاء
+//     ومنح مدراء المنصّة.
+//   • مدير منصّة (platform admin): في admins/{email} — يدير كل التورنيرات.
+//   • عضو معتمَد (member): في members/{email} — يُنشئ تورنيرات ويملكها.
+//   • مدير تورنير: بريده في admin_emails — يدير ذلك التورنير (عدا الطاقم والحذف).
+//   • مسجِّل نتائج: بريده في scorer_emails — يعدّل نتائج/حالة المباريات
+//     ويسجّل الأحداث (أهداف/بطاقات) واللاعبين الجدد فقط.
+//
+//  🔐 لا تُمنح أي صلاحية كتابة إلا لبريد مُوثَّق (email_verified == true).
+//  هذا يمنع انتحال البريد: من يسجّل بعنوان ليس له لن يستطيع تأكيده،
+//  فلا «يرث» صلاحيات مُنحت لذلك العنوان مسبقاً.
+//
+//  القراءة عامّة (عرض للزوّار). النشر: Firebase Console → Firestore → Rules → Publish
 // ============================================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ✍️ بريد/بُرد «المالك»
+    // ✍️ بريد/بُرد «المالك» — بحروف صغيرة حصراً
     function ownerEmails() { return ['ahmad.kefah11sar@gmail.com']; }
 
-    function uemail() { return request.auth != null ? request.auth.token.email : null; }
+    // بريد الطالب: يُعتمد فقط إن كان مُوثَّقاً، ويُعاد بحروف صغيرة — وإلا null
+    function uemail() {
+      return (request.auth != null
+              && request.auth.token.get('email_verified', false) == true
+              && request.auth.token.email != null)
+        ? request.auth.token.email.lower() : null;
+    }
     function isOwner() { return uemail() != null && uemail() in ownerEmails(); }
     function isPlatformAdmin() {
       return isOwner()
@@ -27,18 +42,48 @@ service cloud.firestore {
         || (uemail() != null && exists(/databases/$(database)/documents/members/$(uemail())));
     }
 
-    // صلاحية التعديل داخل تورنير معطى (بمعطياته d): منصّة، أو مالكه، أو مدير معيّن فيه
-    function canEditT(d) {
-      return isPlatformAdmin()
-        || (uemail() != null && (d.owner_email == uemail()
-            || (d.admin_emails is list && uemail().lower() in d.admin_emails)));
+    // مالك التورنير (d = بيانات التورنير)
+    function isTOwner(d) {
+      return uemail() != null && d.get('owner_email', '').lower() == uemail();
+    }
+    // إدارة تورنير: منصّة، أو مالكه، أو مدير معيّن فيه
+    function canManageT(d) {
+      return isPlatformAdmin() || isTOwner(d)
+        || (uemail() != null && uemail() in d.get('admin_emails', []));
+    }
+    // تسجيل نتائج: كل من يدير + المسجّلون المعيَّنون
+    function canScoreT(d) {
+      return canManageT(d)
+        || (uemail() != null && uemail() in d.get('scorer_emails', []));
     }
     function tData(tid) {
       return get(/databases/$(database)/documents/tournaments/$(tid)).data;
     }
-    function parentAllows(tid) {
-      return exists(/databases/$(database)/documents/tournaments/$(tid)) && canEditT(tData(tid));
+    function tExists(tid) {
+      return tid is string && exists(/databases/$(database)/documents/tournaments/$(tid));
     }
+    function parentManages(tid) { return tExists(tid) && canManageT(tData(tid)); }
+    function parentScores(tid)  { return tExists(tid) && canScoreT(tData(tid)); }
+
+    // المفاتيح التي مسّها التعديل الحالي (للـ update فقط)
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+    function changed(k) { return changedKeys().hasAny([k]); }
+
+    // فحوصات قيم عامّة (تتسامح مع الحقل الغائب)
+    function okStr(v, mx) { return v is string && v.size() >= 1 && v.size() <= mx; }
+    function okOptStr(d, k, mx) {
+      return !(k in d) || d[k] == null || (d[k] is string && d[k].size() <= mx);
+    }
+    function okOptInt(d, k, mn, mx) {
+      return !(k in d) || (d[k] is int && d[k] >= mn && d[k] <= mx);
+    }
+    function okNullInt(d, k, mn, mx) {
+      return !(k in d) || d[k] == null || (d[k] is int && d[k] >= mn && d[k] <= mx);
+    }
+    function okOptNum(d, k) { return !(k in d) || d[k] is number; }
+    function okEmailList(d, k) { return !(k in d) || (d[k] is list && d[k].size() <= 30); }
 
     // اقتراح صالح للإضافة من الزائر (بلا تسجيل)
     function isValidSuggestion() {
@@ -51,55 +96,154 @@ service cloud.firestore {
     }
 
     // ---- البطولات ----------------------------------------------------------
-    match /tournaments/{id} {
-      allow read: if true;
-      // ينشئها عضو معتمَد ويضع نفسه مالكاً
-      allow create: if isMember() && request.resource.data.owner_email == uemail();
-      // التعديل: من له صلاحية داخلها؛ لا يتغيّر المالك، وقائمة مدراء التورنير
-      // لا يعدّلها إلا المالك/مدير المنصّة (لا مدير التورنير)
-      allow update: if canEditT(resource.data)
-        && request.resource.data.owner_email == resource.data.owner_email
-        && (request.resource.data.get('admin_emails', []) == resource.data.get('admin_emails', [])
-            || isPlatformAdmin() || resource.data.owner_email == uemail());
-      // الحذف: مالك التورنير أو منصّة فقط
-      allow delete: if isPlatformAdmin() || (uemail() != null && resource.data.owner_email == uemail());
+    function tournamentKeys() {
+      return ['name', 'description', 'status', 'start_date', 'end_date',
+              'qualifiers_per_group', 'win_points', 'draw_points', 'loss_points',
+              'owner_email', 'admin_emails', 'scorer_emails', 'sort_order', 'created_at'];
+    }
+    function tournamentValuesOk(d) {
+      return okStr(d.get('name', ''), 120)
+        && okOptStr(d, 'description', 1000)
+        && (!('status' in d) || d.status in ['upcoming', 'active', 'finished'])
+        && okOptStr(d, 'start_date', 20) && okOptStr(d, 'end_date', 20)
+        && okOptInt(d, 'qualifiers_per_group', 0, 64)
+        && okOptInt(d, 'win_points', 0, 100)
+        && okOptInt(d, 'draw_points', 0, 100)
+        && okOptInt(d, 'loss_points', 0, 100)
+        && (!('owner_email' in d) || okStr(d.owner_email, 254))
+        && okEmailList(d, 'admin_emails') && okEmailList(d, 'scorer_emails')
+        && okOptNum(d, 'sort_order') && okOptNum(d, 'created_at');
     }
 
-    // ---- بيانات التورنير: تُقيَّد بصلاحية التورنير الأب (عبر tournament_id) ----
+    match /tournaments/{id} {
+      allow read: if true;
+      // ينشئها عضو معتمَد ويضع نفسه مالكاً (البريد بحروف صغيرة)
+      allow create: if isMember()
+        && request.resource.data.keys().hasOnly(tournamentKeys())
+        && tournamentValuesOk(request.resource.data)
+        && request.resource.data.get('owner_email', '') == uemail();
+      // التعديل: مدير التورنير فأعلى. المالك لا يتغيّر (إلا بيد مدير المنصّة
+      // لإنقاذ تورنيرات قديمة بلا مالك)، وقائمتا الطاقم لا يعدّلهما
+      // إلا مالك التورنير أو مدير المنصّة (لا مدراء التورنير).
+      allow update: if canManageT(resource.data)
+        && changedKeys().hasOnly(tournamentKeys())
+        && tournamentValuesOk(request.resource.data)
+        && (!changed('owner_email') || isPlatformAdmin())
+        && ((!changed('admin_emails') && !changed('scorer_emails'))
+            || isPlatformAdmin() || isTOwner(resource.data));
+      allow delete: if isPlatformAdmin() || isTOwner(resource.data);
+    }
+
+    // ---- بيانات التورنير (تُقيَّد بصلاحية التورنير الأب عبر tournament_id) ----
+
+    function groupValuesOk(d) {
+      return okStr(d.get('name', ''), 80) && okOptNum(d, 'sort_order');
+    }
     match /groups/{id} {
       allow read: if true;
-      allow create: if parentAllows(request.resource.data.tournament_id);
-      allow update: if parentAllows(resource.data.tournament_id)
-        && request.resource.data.tournament_id == resource.data.tournament_id;
-      allow delete: if parentAllows(resource.data.tournament_id);
+      allow create: if request.resource.data.keys().hasOnly(['tournament_id', 'name', 'sort_order'])
+        && groupValuesOk(request.resource.data)
+        && parentManages(request.resource.data.tournament_id);
+      allow update: if parentManages(resource.data.tournament_id)
+        && changedKeys().hasOnly(['name', 'sort_order'])
+        && groupValuesOk(request.resource.data);
+      allow delete: if parentManages(resource.data.tournament_id);
+    }
+
+    function teamValuesOk(d) {
+      return okStr(d.get('name', ''), 80)
+        && (!('group_id' in d) || d.group_id == null || d.group_id is string)
+        && okOptNum(d, 'sort_order');
     }
     match /teams/{id} {
       allow read: if true;
-      allow create: if parentAllows(request.resource.data.tournament_id);
-      allow update: if parentAllows(resource.data.tournament_id)
-        && request.resource.data.tournament_id == resource.data.tournament_id;
-      allow delete: if parentAllows(resource.data.tournament_id);
+      allow create: if request.resource.data.keys().hasOnly(['tournament_id', 'group_id', 'name', 'sort_order'])
+        && teamValuesOk(request.resource.data)
+        && parentManages(request.resource.data.tournament_id);
+      allow update: if parentManages(resource.data.tournament_id)
+        && changedKeys().hasOnly(['group_id', 'name', 'sort_order'])
+        && teamValuesOk(request.resource.data);
+      allow delete: if parentManages(resource.data.tournament_id);
     }
-    match /matches/{id} {
-      allow read: if true;
-      allow create: if parentAllows(request.resource.data.tournament_id);
-      allow update: if parentAllows(resource.data.tournament_id)
-        && request.resource.data.tournament_id == resource.data.tournament_id;
-      allow delete: if parentAllows(resource.data.tournament_id);
+
+    function playerValuesOk(d) {
+      return okStr(d.get('name', ''), 80)
+        && (!('team_id' in d) || d.team_id is string)
+        && okNullInt(d, 'number', 0, 999)
+        && (!('role' in d) || d.role in ['player', 'coach', 'management'])
+        && okOptNum(d, 'sort_order');
     }
     match /players/{id} {
       allow read: if true;
-      allow create: if parentAllows(request.resource.data.tournament_id);
-      allow update: if parentAllows(resource.data.tournament_id)
-        && request.resource.data.tournament_id == resource.data.tournament_id;
-      allow delete: if parentAllows(resource.data.tournament_id);
+      // الإنشاء متاح للمسجِّل أيضاً (إضافة لاعب سريعة من شاشة المباراة المباشرة)
+      allow create: if request.resource.data.keys().hasOnly(['tournament_id', 'team_id', 'name', 'number', 'role', 'sort_order'])
+        && playerValuesOk(request.resource.data)
+        && request.resource.data.team_id is string
+        && parentScores(request.resource.data.tournament_id);
+      allow update: if parentManages(resource.data.tournament_id)
+        && changedKeys().hasOnly(['name', 'number', 'role', 'sort_order'])
+        && playerValuesOk(request.resource.data);
+      allow delete: if parentManages(resource.data.tournament_id);
+    }
+
+    function matchKeys() {
+      return ['tournament_id', 'group_id', 'round', 'home_team_id', 'away_team_id',
+              'match_date', 'match_time', 'status', 'home_score', 'away_score',
+              'sort_order', 'live_started_at'];
+    }
+    function matchValuesOk(d) {
+      return (!('status' in d) || d.status in ['scheduled', 'live', 'finished'])
+        && okNullInt(d, 'home_score', 0, 999) && okNullInt(d, 'away_score', 0, 999)
+        && (!('group_id' in d) || d.group_id == null || d.group_id is string)
+        && (!('home_team_id' in d) || d.home_team_id == null || d.home_team_id is string)
+        && (!('away_team_id' in d) || d.away_team_id == null || d.away_team_id is string)
+        && okOptStr(d, 'match_date', 20) && okOptStr(d, 'match_time', 20)
+        && okOptInt(d, 'round', 0, 999)
+        && okOptNum(d, 'sort_order')
+        && (!('live_started_at' in d) || d.live_started_at == null || d.live_started_at is number);
+    }
+    // ما يُسمح لمسجِّل النتائج بتغييره في المباراة
+    function scorerMatchKeys() { return ['home_score', 'away_score', 'status', 'live_started_at']; }
+
+    match /matches/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(matchKeys())
+        && matchValuesOk(request.resource.data)
+        && parentManages(request.resource.data.tournament_id);
+      // مدير: كل الحقول (دون نقل المباراة لتورنير آخر) · مسجِّل: النتيجة والحالة فقط
+      allow update: if matchValuesOk(request.resource.data)
+        && (
+          (parentManages(resource.data.tournament_id)
+            && changedKeys().hasOnly(['group_id', 'round', 'home_team_id', 'away_team_id',
+                 'match_date', 'match_time', 'status', 'home_score', 'away_score',
+                 'sort_order', 'live_started_at']))
+          ||
+          (parentScores(resource.data.tournament_id)
+            && changedKeys().hasOnly(scorerMatchKeys()))
+        );
+      allow delete: if parentManages(resource.data.tournament_id);
+    }
+
+    function eventValuesOk(d) {
+      return (!('type' in d) || d.type in ['goal', 'yellow', 'red'])
+        && (!('player_id' in d) || d.player_id == null || d.player_id is string)
+        && (!('team_id' in d) || d.team_id is string)
+        && (!('match_id' in d) || d.match_id is string)
+        && okNullInt(d, 'minute', 0, 300)
+        && okOptNum(d, 'created_at');
     }
     match /events/{id} {
       allow read: if true;
-      allow create: if parentAllows(request.resource.data.tournament_id);
-      allow update: if parentAllows(resource.data.tournament_id)
-        && request.resource.data.tournament_id == resource.data.tournament_id;
-      allow delete: if parentAllows(resource.data.tournament_id);
+      allow create: if request.resource.data.keys().hasOnly(['tournament_id', 'match_id', 'team_id', 'player_id', 'type', 'minute', 'created_at'])
+        && eventValuesOk(request.resource.data)
+        && request.resource.data.match_id is string
+        && request.resource.data.team_id is string
+        && parentScores(request.resource.data.tournament_id);
+      // التعديل الوحيد المسموح: فكّ ربط لاعب محذوف (player_id → null) — للمدير
+      allow update: if parentManages(resource.data.tournament_id)
+        && changedKeys().hasOnly(['player_id'])
+        && request.resource.data.player_id == null;
+      allow delete: if parentScores(resource.data.tournament_id);
     }
 
     // ---- صندوق الاقتراحات ---------------------------------------------------
@@ -109,26 +253,40 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ---- المسجّلون: كل مستخدم ينشئ وثيقته؛ مدراء المنصّة يقرؤون القائمة --------
-    match /users/{uid} {
-      allow read: if isPlatformAdmin();
-      allow create, update: if request.auth != null && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['email', 'name', 'created_at'])
-        && request.resource.data.email == uemail()
-        && request.resource.data.name is string && request.resource.data.name.size() <= 60;
+    // ---- المسجّلون: كلٌّ ينشئ/يحدّث وثيقته؛ الأعضاء فأعلى يقرؤون القائمة -------
+    //  (قراءة القائمة للأعضاء تتيح لمالكي التورنيرات اختيار الطاقم من المسجّلين)
+    match /users/{userId} {
+      allow read: if isMember() || (request.auth != null && request.auth.uid == userId);
+      allow create, update: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(['email', 'name', 'created_at', 'verified'])
+        && request.resource.data.email is string
+        && request.resource.data.email == request.auth.token.email.lower()
+        && request.resource.data.name is string && request.resource.data.name.size() <= 60
+        && request.resource.data.get('created_at', 0) is number
+        && request.resource.data.get('verified', false) == request.auth.token.get('email_verified', false);
       allow delete: if isOwner();
     }
 
     // ---- الأعضاء المعتمَدون (يُنشئون تورنيرات) — المالك وحده يعتمد -------------
     match /members/{addr} {
       allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr);
-      allow write: if isOwner();
+      allow create, update: if isOwner()
+        && addr == addr.lower()
+        && request.resource.data.keys().hasOnly(['email', 'added_at'])
+        && request.resource.data.get('email', '') == addr
+        && request.resource.data.get('added_at', 0) is number;
+      allow delete: if isOwner();
     }
 
     // ---- مدراء المنصّة (كل الصلاحيات) — المالك وحده يمنح ----------------------
     match /admins/{addr} {
       allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr);
-      allow write: if isOwner();
+      allow create, update: if isOwner()
+        && addr == addr.lower()
+        && request.resource.data.keys().hasOnly(['email', 'added_at'])
+        && request.resource.data.get('email', '') == addr
+        && request.resource.data.get('added_at', 0) is number;
+      allow delete: if isOwner();
     }
 
     // أي مجموعة أخرى: ممنوعة افتراضياً

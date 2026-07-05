@@ -69,6 +69,74 @@ export const t = {
   noTournamentAdmins: "لا مدراء لهذا التورنير بعد",
   alreadyAdmin: "هذا البريد مضاف مسبقاً",
 
+  // مصادقة موسّعة
+  continueWithGoogle: "المتابعة بحساب Google",
+  orSep: "أو",
+  showPassword: "إظهار كلمة المرور",
+  hidePassword: "إخفاء كلمة المرور",
+  passwordHint: "٨ أحرف على الأقل",
+  weakPasswordLocal: "كلمة المرور قصيرة — ٨ أحرف على الأقل",
+  forgotPassword: "نسيت كلمة المرور؟",
+  enterEmailFirst: "اكتب بريدك الإلكتروني في الحقل أولاً ثم اضغط «نسيت كلمة المرور»",
+  resetSent: "إن كان البريد مسجَّلاً لدينا فستصلك رسالة لإعادة تعيين كلمة المرور",
+
+  // تأكيد البريد الإلكتروني
+  verifyTitle: "أكِّد بريدك الإلكتروني",
+  verifySentTo: "أرسلنا رسالة تأكيد إلى:",
+  verifyBody: "افتح الرسالة واضغط رابط التأكيد، ثم عُد إلى هنا واضغط «تحقّقت». لا تُمنح أي صلاحيات إدارة قبل تأكيد البريد.",
+  verifySpamHint: "لم تصلك الرسالة؟ تحقّق من مجلد الرسائل غير المرغوب فيها (Spam).",
+  resendVerify: "إعادة إرسال رسالة التأكيد",
+  resendWait: "إعادة الإرسال بعد",
+  verifySent: "أُرسلت رسالة التأكيد",
+  iVerified: "تحقّقت — تحديث",
+  stillNotVerified: "لم يصل التأكيد بعد — افتح الرابط في الرسالة ثم أعد المحاولة",
+
+  // حسابي
+  myAccount: "حسابي",
+  displayNameLbl: "الاسم الظاهر",
+  googleAccountNote: "دخلت بحساب Google — كلمة المرور تُدار من Google.",
+  changePassword: "تغيير كلمة المرور",
+  currentPassword: "كلمة المرور الحالية",
+  newPassword: "كلمة المرور الجديدة",
+  passwordChanged: "تم تغيير كلمة المرور",
+
+  // طاقم البطولة (مدراء + مسجّلو نتائج)
+  tournamentStaff: "طاقم البطولة",
+  tournamentScorers: "مسجّلو النتائج",
+  tournamentScorersHint: "يستطيعون إدخال النتائج والأهداف والبطاقات فقط — دون تعديل الفرق أو البيوت أو إعدادات البطولة.",
+  noTournamentScorers: "لا مسجّلي نتائج بعد",
+  staffEmailPlaceholder: "بريد إلكتروني أو اختيار من المسجّلين",
+  staffNotRegistered: "لم يُسجَّل بعد — ستُفعَّل صلاحيته بعد إنشاء حسابه وتأكيد بريده",
+  staffNotVerified: "سجَّل لكنه لم يؤكّد بريده بعد",
+  invalidEmail: "صيغة البريد الإلكتروني غير صحيحة",
+  scorerModeHint: "أنت مسجِّل نتائج في هذه البطولة — يمكنك إدخال النتائج والأحداث فقط.",
+  enterResultsOnly: "إدخال النتائج",
+  roleScorer: "مسجِّل نتائج",
+
+  // المستخدمون
+  searchUsersPlaceholder: "بحث بالاسم أو البريد…",
+  verifiedBadge: "موثَّق",
+  notVerifiedBadge: "غير موثَّق",
+
+  // رسائل أخطاء المصادقة (حسب رمز Firebase)
+  authErrors: {
+    "auth/invalid-credential": "البريد أو كلمة المرور غير صحيحة",
+    "auth/user-not-found": "البريد أو كلمة المرور غير صحيحة",
+    "auth/wrong-password": "كلمة المرور غير صحيحة",
+    "auth/too-many-requests": "محاولات كثيرة — انتظر قليلاً ثم حاول مجدداً",
+    "auth/email-already-in-use": "هذا البريد مسجَّل مسبقاً — جرّب تسجيل الدخول",
+    "auth/invalid-email": "صيغة البريد الإلكتروني غير صحيحة",
+    "auth/weak-password": "كلمة المرور ضعيفة — ٨ أحرف على الأقل",
+    "auth/network-request-failed": "تعذّر الاتصال — تحقّق من الإنترنت",
+    "auth/popup-closed-by-user": "أُغلقت نافذة Google قبل إتمام الدخول",
+    "auth/cancelled-popup-request": "أُغلقت نافذة Google قبل إتمام الدخول",
+    "auth/popup-blocked": "المتصفّح منع النافذة المنبثقة — اسمح بالنوافذ المنبثقة ثم أعد المحاولة",
+    "auth/unauthorized-domain": "هذا النطاق غير مصرَّح به في إعدادات Firebase (Authorized domains)",
+    "auth/operation-not-allowed": "طريقة الدخول هذه غير مفعَّلة في إعدادات Firebase",
+    "auth/requires-recent-login": "لأمانك، سجِّل الخروج ثم الدخول مجدداً وحاول مرة أخرى",
+    "auth/account-exists-with-different-credential": "هذا البريد مسجَّل بطريقة دخول أخرى — جرّب Google أو البريد وكلمة المرور",
+  },
+
   // الترتيب
   th_rank: "#",
   th_team: "الفريق",

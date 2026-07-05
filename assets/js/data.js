@@ -11,6 +11,9 @@ import {
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
   signOut as fbSignOut, onAuthStateChanged,
+  sendEmailVerification, sendPasswordResetEmail,
+  GoogleAuthProvider, signInWithPopup,
+  updatePassword, EmailAuthProvider, reauthenticateWithCredential,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
 
@@ -48,17 +51,19 @@ export async function fetchTournaments() {
   return mapDocs(snap).sort(byTournamentOrder);
 }
 
-// التورنيرات التي يديرها البريد: يملكها أو معيَّن مديراً فيها (لصفحة إدارة العضو)
+// التورنيرات المرتبطة بالبريد: يملكها، أو مدير فيها، أو مسجِّل نتائج فيها
 export async function fetchMyTournaments(email) {
   if (!email) return [];
   const d = requireDb();
-  const [owned, adminOf] = await Promise.all([
-    getDocs(query(collection(d, "tournaments"), where("owner_email", "==", email))),
-    // admin_emails مخزّنة بحروف صغيرة (كما تقارنها القاعدة بـ uemail().lower())
-    getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", email.toLowerCase()))),
+  const low = String(email).toLowerCase();
+  // كل العناوين مخزّنة بحروف صغيرة (owner_email من Firebase، والقائمتان من الواجهة)
+  const [owned, adminOf, scorerOf] = await Promise.all([
+    getDocs(query(collection(d, "tournaments"), where("owner_email", "==", low))),
+    getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", low))),
+    getDocs(query(collection(d, "tournaments"), where("scorer_emails", "array-contains", low))),
   ]);
   const byId = new Map();
-  for (const doc of [...mapDocs(owned), ...mapDocs(adminOf)]) byId.set(doc.id, doc);
+  for (const doc of [...mapDocs(owned), ...mapDocs(adminOf), ...mapDocs(scorerOf)]) byId.set(doc.id, doc);
   return [...byId.values()].sort(byTournamentOrder);
 }
 
@@ -195,17 +200,100 @@ export async function signIn(email, password) {
   return { user: cred.user };
 }
 
-// تسجيل جديد: إنشاء حساب + حفظ اسم المستخدم في مجموعة users (يظهر للمالك ليمنحه الإدارة)
+// تسجيل جديد: إنشاء حساب + رسالة تأكيد البريد + وثيقة في users (تظهر لمانحي الصلاحيات)
 export async function signUp(email, password, name) {
-  const cred = await createUserWithEmailAndPassword(auth, email, password);
+  const cred = await createUserWithEmailAndPassword(auth, String(email || "").trim(), password);
   const displayName = (name || "").trim().slice(0, 60);
   try { if (displayName) await updateProfile(cred.user, { displayName }); } catch {}
+  // تأكيد البريد إلزامي لأي صلاحية كتابة (تفرضه firestore.rules)
+  try { await sendEmailVerification(cred.user); } catch (e) { console.warn(e); }
   await setDoc(doc(requireDb(), "users", cred.user.uid), clean({
-    email: cred.user.email,
+    email: (cred.user.email || "").toLowerCase(),
     name: displayName || cred.user.email || "",
     created_at: Date.now(),
+    verified: !!cred.user.emailVerified,
   }));
   return { user: cred.user };
+}
+
+// دخول بحساب Google — البريد مُوثَّق تلقائياً
+export async function signInWithGoogle() {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: "select_account" });
+  const cred = await signInWithPopup(auth, provider);
+  try { await syncMyUserDoc(cred.user); } catch (e) { console.warn(e); }
+  return { user: cred.user };
+}
+
+// «نسيت كلمة المرور» — رسالة إعادة تعيين إلى البريد
+export async function sendReset(email) {
+  await sendPasswordResetEmail(auth, String(email || "").trim());
+}
+
+// إعادة إرسال رسالة تأكيد البريد للمستخدم الحالي
+export async function resendVerification() {
+  if (auth?.currentUser) await sendEmailVerification(auth.currentUser);
+}
+
+// إعادة تحميل حالة المستخدم (بعد الضغط على رابط التأكيد) وإخطار الواجهة
+export async function refreshSession() {
+  if (auth?.currentUser) { try { await auth.currentUser.reload(); } catch {} }
+  currentUser = auth?.currentUser || null;
+  const s = currentUser ? { user: currentUser } : null;
+  authCbs.forEach((cb) => { try { cb(s); } catch (e) { console.error(e); } });
+  return s;
+}
+
+// مزامنة وثيقة المستخدم (الاسم/حالة التوثيق) — تُنشأ أيضاً عند أول دخول Google
+export async function syncMyUserDoc(u = currentUser) {
+  if (!u || !db) return;
+  const ref = doc(requireDb(), "users", u.uid);
+  let snap = null;
+  try { snap = await getDoc(ref); } catch { return; } // قبل نشر القواعد الجديدة قد تُرفض القراءة
+  const email = (u.email || "").toLowerCase();
+  if (!snap.exists()) {
+    try {
+      await setDoc(ref, clean({
+        email,
+        name: (u.displayName || email || "").slice(0, 60),
+        created_at: Date.now(),
+        verified: !!u.emailVerified,
+      }));
+    } catch (e) { console.warn(e); }
+    return;
+  }
+  const cur = snap.data() || {};
+  const patch = {};
+  if (!!cur.verified !== !!u.emailVerified) patch.verified = !!u.emailVerified;
+  const nm = (u.displayName || "").trim().slice(0, 60);
+  if (nm && nm !== cur.name) patch.name = nm;
+  if (Object.keys(patch).length) {
+    try { await updateDoc(ref, patch); } catch (e) { console.warn(e); }
+  }
+}
+
+// هل دخل المستخدم ببريد/كلمة مرور؟ (تغيير كلمة المرور متاح لهؤلاء فقط)
+export function passwordProvider() {
+  return !!auth?.currentUser?.providerData?.some((p) => p.providerId === "password");
+}
+
+// تغيير الاسم الظاهر (في الحساب وفي وثيقة users)
+export async function updateMyName(name) {
+  const u = auth?.currentUser;
+  if (!u) throw new Error("no user");
+  const nm = String(name || "").trim().slice(0, 60);
+  await updateProfile(u, { displayName: nm });
+  try { await updateDoc(doc(requireDb(), "users", u.uid), { name: nm || (u.email || "") }); } catch {}
+  return nm;
+}
+
+// تغيير كلمة المرور (بعد إعادة التحقق بكلمة المرور الحالية)
+export async function changeMyPassword(currentPass, nextPass) {
+  const u = auth?.currentUser;
+  if (!u || !u.email) throw new Error("no user");
+  const cred = EmailAuthProvider.credential(u.email, currentPass);
+  await reauthenticateWithCredential(u, cred);
+  await updatePassword(u, nextPass);
 }
 
 export async function signOut() { if (auth) await fbSignOut(auth); }
@@ -231,14 +319,14 @@ async function hasDoc(coll, id) {
 export async function amIPlatformAdmin() {
   const u = currentUser;
   if (!u || !u.email) return false;
-  return isOwnerEmail(u.email) || hasDoc("admins", u.email);
+  return isOwnerEmail(u.email) || hasDoc("admins", u.email.toLowerCase());
 }
 
 // عضو معتمَد: بريده في members (يُنشئ تورنيرات). فحص وثيقته فقط دون تكرار فحص المنصّة.
 export async function isInMembers() {
   const u = currentUser;
   if (!u || !u.email) return false;
-  return hasDoc("members", u.email);
+  return hasDoc("members", u.email.toLowerCase());
 }
 
 export async function fetchUsers() {
@@ -255,15 +343,17 @@ export async function fetchMemberEmails() {
   return new Set(snap.docs.map((d) => d.id));
 }
 
-// المفتاح هو البريد كما هو (يطابق token.email للمستخدم)
+// المفتاح هو البريد بحروف صغيرة (كما تقارنه القواعد بـ uemail() المُصغَّر)
 export async function setAdmin(email, on) {
-  const ref = doc(requireDb(), "admins", email);
-  if (on) await setDoc(ref, clean({ email, added_at: Date.now() }));
+  const key = String(email || "").trim().toLowerCase();
+  const ref = doc(requireDb(), "admins", key);
+  if (on) await setDoc(ref, clean({ email: key, added_at: Date.now() }));
   else await deleteDoc(ref);
 }
 export async function setMember(email, on) {
-  const ref = doc(requireDb(), "members", email);
-  if (on) await setDoc(ref, clean({ email, added_at: Date.now() }));
+  const key = String(email || "").trim().toLowerCase();
+  const ref = doc(requireDb(), "members", key);
+  if (on) await setDoc(ref, clean({ email: key, added_at: Date.now() }));
   else await deleteDoc(ref);
 }
 
@@ -286,9 +376,10 @@ async function nullifyWhere(coll, field, value) {
 }
 
 export async function createTournament(p) {
-  // منشئ التورنير = مالكه (تفرضه القواعد: owner_email == بريد المُنشئ)
+  // منشئ التورنير = مالكه (تفرضه القواعد: owner_email == uemail() المُصغَّر)
   const data = { ...p };
   if (!data.owner_email && currentUser?.email) data.owner_email = currentUser.email;
+  if (data.owner_email) data.owner_email = String(data.owner_email).toLowerCase();
   const ref = await addDoc(collection(requireDb(), "tournaments"), clean(data));
   return { id: ref.id, ...data };
 }
@@ -527,7 +618,9 @@ export function buildFixtures(tournamentId, groups, teams) {
 
 export async function seedSampleTournament() {
   const d = requireDb();
-  const tRef = await addDoc(collection(d, "tournaments"), clean(SAMPLE.tournament));
+  // القواعد تشترط owner_email == بريد المُنشئ (بحروف صغيرة)
+  const tRef = await addDoc(collection(d, "tournaments"),
+    clean({ ...SAMPLE.tournament, owner_email: (currentUser?.email || "").toLowerCase() }));
   const tid = tRef.id;
 
   const groupIdByKey = {};
