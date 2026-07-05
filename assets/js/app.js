@@ -29,6 +29,7 @@ function parseHash() {
   // "" | "t/:id" | "t/:id/:tab" | "t/:id/m/:matchId"
   if (parts[0] === "t" && parts[1]) {
     if (parts[2] === "m" && parts[3]) return { view: "match", id: parts[1], matchId: parts[3] };
+    if (parts[2] === "team" && parts[3]) return { view: "team", id: parts[1], teamId: parts[3] };
     return { view: "tournament", id: parts[1], tab: parts[2] || "schedule" };
   }
   return { view: "home" };
@@ -40,6 +41,7 @@ async function route() {
   const r = parseHash();
   try {
     if (r.view === "match") await renderMatchDetail(r.id, r.matchId);
+    else if (r.view === "team") await renderTeamDetail(r.id, r.teamId);
     else if (r.view === "tournament") await renderTournament(r.id, r.tab);
     else await renderHome();
     window.scrollTo(0, 0);
@@ -144,6 +146,7 @@ function renderTournamentShell(state) {
   const tabs = el("div.tabs", { role: "tablist" }, [
     tabBtn(t.schedule, tournament.id, "schedule", state.tab),
     tabBtn(t.standings, tournament.id, "standings", state.tab),
+    tabBtn(t.teamsTab, tournament.id, "teams", state.tab),
   ]);
   const content = el("div", { id: "tab-content" });
   mount(app,
@@ -190,7 +193,79 @@ function renderTabContent(state) {
   if (!host) return;
   clear(host);
   if (state.tab === "standings") host.appendChild(renderStandings(state));
+  else if (state.tab === "teams") host.appendChild(renderTeams(state));
   else host.appendChild(renderSchedule(state));
+}
+
+// ---- تبويب الفرق (كل البيوت وفرقها) ---------------------------------------
+
+function renderTeams(state) {
+  const { bundle, tournament } = state;
+  const groups = bundle.groups.length ? bundle.groups : [{ id: null, name: t.teamsTab }];
+  const wrap = el("div");
+  let any = false;
+  for (const g of groups) {
+    const groupTeams = bundle.teams.filter((x) => x.group_id === g.id)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    if (!groupTeams.length) continue;
+    any = true;
+    const grid = el("div.teams-grid");
+    for (const tm of groupTeams) {
+      const count = (bundle.players || []).filter((p) => p.team_id === tm.id && (p.role || "player") === "player").length;
+      grid.appendChild(el("a.team-card", { href: `#/t/${tournament.id}/team/${tm.id}` }, [
+        el("span.team-card-name", { text: tm.name }),
+        el("span.team-card-sub", { text: count ? `${count} ${t.squadPlayers}` : t.viewSquad }),
+        el("span.match-go", { "aria-hidden": "true", text: "‹" }),
+      ]));
+    }
+    wrap.appendChild(el("div.standings-block", {}, [
+      el("div.standings-title", {}, [el("span", { text: "🏠" }), el("span", { text: g.name })]),
+      grid,
+    ]));
+  }
+  if (!any) return emptyState("👥", t.noTeamsYet);
+  return wrap;
+}
+
+// ---- صفحة فريق (اللاعبون + الإدارة) ----------------------------------------
+
+async function renderTeamDetail(id, teamId) {
+  mount(app, spinner());
+  const tournament = await fetchTournament(id);
+  if (!tournament) return mount(app, emptyState("🔍", "البطولة غير موجودة"),
+    el("a.btn.btn-outline", { href: "#/", text: t.backToTournaments }));
+  const bundle = await fetchTournamentBundle(id);
+  const team = bundle.teams.find((x) => x.id === teamId);
+  const backLink = el("a.header-link", { href: `#/t/${id}/teams`,
+    text: "→ " + t.teamsTab, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" });
+  if (!team) return mount(app, backLink, emptyState("🔍", "الفريق غير موجود"));
+
+  const group = bundle.groups.find((x) => x.id === team.group_id);
+  const members = (bundle.players || []).filter((p) => p.team_id === teamId)
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const ofRole = (r) => members.filter((p) => (p.role || "player") === r);
+
+  const section = (label, arr, showNum) => arr.length ? el("div.sq-group", {}, [
+    el("div.sq-label", { text: label }),
+    el("div.card", {}, arr.map((p) => el("div.sq-row", {}, [
+      showNum ? el("span.player-num", { text: p.number != null && p.number !== "" ? String(p.number) : "•" }) : el("span.sq-dot", { text: "•" }),
+      el("span.sq-name", { text: p.name }),
+    ]))),
+  ]) : null;
+
+  document.title = team.name + " · " + (SITE_NAME || "");
+  mount(app,
+    backLink,
+    el("div.page-head", { style: "margin-top:10px" }, [
+      el("h1.page-title", { text: team.name }),
+      group ? el("p.page-sub", { text: group.name }) : null,
+    ]),
+    !members.length ? emptyState("👤", t.noLineup) : el("div", {}, [
+      section(t.squadPlayers, ofRole("player"), true),
+      section(t.squadCoach, ofRole("coach"), false),
+      section(t.squadManagement, ofRole("management"), false),
+    ]),
+  );
 }
 
 // ---- تبويب البرنامج --------------------------------------------------------

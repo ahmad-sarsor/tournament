@@ -131,6 +131,12 @@ export const t = {
   // اللاعبون / السجل (التشكيلة)
   players: "اللاعبون",
   squad: "السجل",
+  teamsTab: "الفرق",
+  teamDetails: "الفريق",
+  viewSquad: "عرض التشكيلة",
+  moveUp: "تحريك لأعلى",
+  moveDown: "تحريك لأسفل",
+  noTeamsYet: "لا توجد فرق بعد",
   manageSquad: "سجلّ الفريق",
   managePlayers: "لاعبو الفريق",
   addMember: "إضافة",

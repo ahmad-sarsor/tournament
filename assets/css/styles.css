@@ -420,6 +420,23 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
 .player-pick:hover { border-color: var(--brand); color: var(--brand); }
 .player-pick.pick-new { border-style: dashed; color: var(--brand); background: var(--brand-soft); }
 
+/* ===== الفرق + التشكيلة (عرض عام) ======================================= */
+.teams-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.team-card { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-xs); transition: border-color .15s, box-shadow .15s, transform .12s; color: var(--text); }
+.team-card:hover { border-color: var(--border-2); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
+.team-card-name { font-weight: 800; color: var(--ink); flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.team-card-sub { color: var(--text-3); font-size: .78rem; font-weight: 600; white-space: nowrap; }
+.team-card .match-go { color: var(--text-3); font-size: 1.2rem; }
+.team-card:hover .match-go { color: var(--brand); }
+
+.player-num { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: .8rem; }
+.sq-group { margin-bottom: 18px; }
+.sq-label { font-size: .74rem; font-weight: 800; color: var(--text-3); letter-spacing: .02em; margin: 0 2px 8px; }
+.sq-row { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
+.sq-row:last-child { border-bottom: 0; }
+.sq-name { font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.sq-dot { color: var(--text-3); width: 26px; text-align: center; font-weight: 800; }
+
 /* الإعدادات ---------------------------------------------------------------- */
 .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .set-row:first-child { padding-top: 0; }
