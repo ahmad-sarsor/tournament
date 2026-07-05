@@ -6,7 +6,7 @@ import { SITE_NAME } from "./config.js";
 import { t, statusLabel, matchStatusLabel, formatDate, formatTime, weekdayName } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast } from "./util.js";
 import {
-  fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted,
+  fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
 } from "./data.js";
 import { renderScheduleDays, standingsTable, eventsTimeline } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
