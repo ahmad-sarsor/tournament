@@ -230,54 +230,47 @@ img { max-width: 100%; }
 .lu-row { display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-weight: 600; font-size: .92rem; }
 .lu-row .player-num { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 6px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: .78rem; }
 
-/* ===== الترتيب (تصميم أنيق) ============================================= */
-.standings-block { margin-bottom: 24px; }
-.standings-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 12px; font-weight: 800; font-size: 1.02rem; color: var(--ink); }
-.table-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--surface); }
-/* التخطيط الثابت يضمن اتّساع كل الأعمدة داخل الشاشة بلا تمرير أفقي */
+/* ===== الترتيب (أسلوب 365 مضغوط ومنسّق) ================================= */
+.standings-block { margin-bottom: 20px; }
+.standings-title { display: flex; align-items: center; gap: 8px; margin: 0 2px 10px; font-weight: 800; font-size: 1rem; color: var(--ink); }
+.table-wrap { border-radius: var(--radius); border: 1px solid var(--border); box-shadow: var(--shadow-sm); background: var(--surface); overflow: hidden; }
+.standings-wrap.show-all .table-wrap { overflow-x: auto; }
 table.standings { width: 100%; border-collapse: collapse; table-layout: fixed; }
 table.standings .col-extra { display: none; }
-.standings-wrap.show-all table.standings { table-layout: auto; min-width: 640px; }
+.standings-wrap.show-all table.standings { table-layout: auto; min-width: 620px; }
 .standings-wrap.show-all table.standings .col-extra { display: table-cell; }
 
-/* عرض الأعمدة في الوضع المضغوط */
-table.standings thead th.rank-col { width: 32px; }
-table.standings thead th.stat-col { width: 11.5%; }
-table.standings thead th.pts-col  { width: 46px; }
+/* عرض الأعمدة — مضغوطة كي يتّسع كل شيء بلا تمرير */
+table.standings thead th.rank-col { width: 28px; }
+table.standings thead th.stat-col { width: 30px; }
+table.standings thead th.pts-col  { width: 42px; }
 table.standings thead th.team-col { width: auto; }
 
 table.standings thead th {
-  background: var(--surface-2); color: var(--text-3); font-size: .7rem; font-weight: 700;
-  text-align: center; padding: 11px 3px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  background: var(--surface-2); color: var(--text-3); font-size: .68rem; font-weight: 700;
+  text-align: center; padding: 8px 2px; border-bottom: 1px solid var(--border); white-space: nowrap;
 }
-table.standings th.team-col, table.standings td.team-col { text-align: start; padding-inline-start: 8px; }
+table.standings th.team-col, table.standings td.team-col { text-align: start; padding-inline-start: 5px; }
 table.standings tbody td {
-  padding: 12px 3px; text-align: center; font-variant-numeric: tabular-nums;
-  border-bottom: 1px solid var(--border); font-weight: 700; font-size: .9rem; color: var(--text-2);
+  padding: 9px 2px; text-align: center; font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border); font-weight: 700; font-size: .86rem; color: var(--text-2);
 }
 table.standings tbody tr:last-child td { border-bottom: 0; }
 
-/* الرتبة كدائرة */
-table.standings .rank {
-  display: inline-grid; place-items: center; width: 25px; height: 25px; border-radius: 50%;
-  background: var(--surface-2); font-size: .8rem; font-weight: 800; color: var(--text-2);
-}
-table.standings .team-name { font-weight: 800; color: var(--ink); overflow-wrap: anywhere; line-height: 1.3; font-size: .92rem; }
-
-/* النقاط مُبرَزة كرقاقة */
-table.standings .pts { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 5px; border-radius: 7px; background: var(--brand-soft); color: var(--brand-strong); font-weight: 800; font-size: .92rem; }
-
+table.standings .rank { font-weight: 800; font-size: .84rem; color: var(--text-3); }
+table.standings .team-name { font-weight: 800; color: var(--ink); overflow-wrap: anywhere; line-height: 1.25; font-size: .88rem; }
+table.standings .pts { font-weight: 900; color: var(--ink); font-size: .96rem; }
 table.standings td.pos-diff.pos { color: var(--win); }
 table.standings td.pos-diff.neg { color: var(--loss); }
 
-/* منطقة التأهّل + المتصدّر */
-table.standings tr.qualify td { background: color-mix(in srgb, var(--brand) 5%, transparent); }
-table.standings tr.qualify td.team-col { box-shadow: inset 3px 0 0 var(--brand); }
-table.standings tr.qualify .rank { background: var(--brand); color: #fff; box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--brand) 55%, transparent); }
-table.standings tr.champion td { background: color-mix(in srgb, var(--gold) 9%, transparent); }
-table.standings tr.champion td.team-col { box-shadow: inset 3px 0 0 var(--gold); }
-table.standings tr.champion .rank { background: var(--gold); color: #4a2f00; box-shadow: 0 2px 6px -1px color-mix(in srgb, var(--gold) 55%, transparent); }
-table.standings tr.champion .pts { background: color-mix(in srgb, var(--gold) 20%, transparent); color: #8a5a00; }
+/* مناطق التأهّل والمتصدّر — شريط جانبي ملوّن مثل 365 */
+table.standings tbody tr.qualify td { background: color-mix(in srgb, var(--brand) 5%, transparent); }
+table.standings tbody tr.qualify td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+table.standings tbody tr.qualify .rank { color: var(--brand); }
+table.standings tbody tr.champion td { background: color-mix(in srgb, var(--gold) 8%, transparent); }
+table.standings tbody tr.champion td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
+table.standings tbody tr.champion .rank { color: #b45309; }
+table.standings tbody tr.champion .pts { color: #b45309; }
 table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 7%, transparent); }
 
 /* دليل الأداء (آخر النتائج) */
@@ -419,6 +412,19 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
 .player-pick { min-height: 48px; justify-content: center; text-align: center; background: var(--surface-2); font-weight: 600; }
 .player-pick:hover { border-color: var(--brand); color: var(--brand); }
 .player-pick.pick-new { border-style: dashed; color: var(--brand); background: var(--brand-soft); }
+
+/* ===== الإحصائيات ======================================================= */
+.stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+.stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 12px; text-align: center; box-shadow: var(--shadow-xs); min-width: 0; }
+.stat-val { font-size: 1.5rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-lbl { font-size: .72rem; color: var(--text-3); font-weight: 600; margin-top: 4px; }
+.stats-section { margin-bottom: 24px; }
+.stats-section .mp-title { display: flex; align-items: center; gap: 2px; }
+.stat-team { color: var(--text-2); font-weight: 600; font-size: .86rem; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .stat-tiles { grid-template-columns: 1fr 1fr; }
+  .stat-val { font-size: 1.3rem; }
+}
 
 /* ===== الفرق + التشكيلة (عرض عام) ======================================= */
 .teams-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }

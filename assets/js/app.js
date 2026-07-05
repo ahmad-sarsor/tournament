@@ -147,6 +147,7 @@ function renderTournamentShell(state) {
     tabBtn(t.schedule, tournament.id, "schedule", state.tab),
     tabBtn(t.standings, tournament.id, "standings", state.tab),
     tabBtn(t.teamsTab, tournament.id, "teams", state.tab),
+    tabBtn(t.statsTab, tournament.id, "stats", state.tab),
   ]);
   const content = el("div", { id: "tab-content" });
   mount(app,
@@ -194,35 +195,166 @@ function renderTabContent(state) {
   clear(host);
   if (state.tab === "standings") host.appendChild(renderStandings(state));
   else if (state.tab === "teams") host.appendChild(renderTeams(state));
+  else if (state.tab === "stats") host.appendChild(renderStats(state));
   else host.appendChild(renderSchedule(state));
+}
+
+// ---- تبويب الإحصائيات ------------------------------------------------------
+
+function renderStats(state) {
+  const { bundle, tournament } = state;
+  const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
+  const groupById = new Map(bundle.groups.map((x) => [x.id, x]));
+  const playersById = new Map((bundle.players || []).map((x) => [x.id, x]));
+  const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
+
+  let activeGroup = "all";
+  const wrap = el("div");
+  const content = el("div");
+
+  const chips = el("div.filters");
+  if (bundle.groups.length > 1) {
+    const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
+      text: label,
+      onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerender(); },
+    });
+    chips.appendChild(makeChip(t.allGroups, "all"));
+    for (const g of bundle.groups) chips.appendChild(makeChip(g.name, g.id));
+    wrap.appendChild(chips);
+  }
+  wrap.appendChild(content);
+
+  function statTile(value, label) {
+    return el("div.stat-tile", {}, [el("div.stat-val", { text: String(value) }), el("div.stat-lbl", { text: label })]);
+  }
+
+  function rerender() {
+    const teamIds = activeGroup === "all" ? null : new Set(bundle.teams.filter((x) => x.group_id === activeGroup).map((x) => x.id));
+    const inFilter = (tid) => !teamIds || teamIds.has(tid);
+    const teamName = (tid) => teamById.get(tid)?.name || "—";
+
+    // المباريات المُحتسَبة (منتهية وضمن المرشّح) — منها تُبنى كل الإحصائيات
+    const played = (bundle.matches || []).filter((m) => isCounted(m) && inFilter(m.home_team_id) && inFilter(m.away_team_id));
+    const countedIds = new Set(played.map((m) => m.id));
+
+    // أهداف اللاعبين والبطاقات من أحداث تلك المباريات فقط (اتّساقاً مع باقي الإحصائيات)
+    const goalMap = new Map(), cardMap = new Map();
+    for (const e of bundle.events || []) {
+      if (!e.player_id || !countedIds.has(e.match_id)) continue;
+      if (e.type === "goal") goalMap.set(e.player_id, (goalMap.get(e.player_id) || 0) + 1);
+      else if (e.type === "yellow" || e.type === "red") {
+        const c = cardMap.get(e.player_id) || { y: 0, r: 0, team: e.team_id };
+        if (e.type === "yellow") c.y++; else c.r++;
+        cardMap.set(e.player_id, c);
+      }
+    }
+    const scorers = [...goalMap.entries()]
+      .map(([pid, g]) => ({ p: playersById.get(pid), goals: g }))
+      .filter((x) => x.p)
+      .sort((a, b) => b.goals - a.goals || a.p.name.localeCompare(b.p.name, "ar"));
+    const cards = [...cardMap.entries()]
+      .map(([pid, c]) => ({ p: playersById.get(pid), ...c }))
+      .filter((x) => x.p)
+      .sort((a, b) => (b.r - a.r) || (b.y - a.y) || a.p.name.localeCompare(b.p.name, "ar"));
+
+    const totalGoals = played.reduce((s, m) => s + (m.home_score || 0) + (m.away_score || 0), 0);
+    const avg = played.length ? (totalGoals / played.length).toFixed(1) : "0";
+
+    // إحصائيات الفرق (ترتيب حسب الأهداف المُسجَّلة)
+    const teams = activeGroup === "all" ? bundle.teams : bundle.teams.filter((x) => x.group_id === activeGroup);
+    const teamRows = computeGroupStandings(teams, bundle.matches, points)
+      .slice().sort((a, b) => b.gf - a.gf || b.gd - a.gd || a.team.name.localeCompare(b.team.name, "ar"));
+
+    // بلاطات ملخّص
+    const tiles = el("div.stat-tiles", {}, [
+      statTile(played.length, t.statMatchesPlayed),
+      statTile(totalGoals, t.statTotalGoals),
+      statTile(avg, t.statAvgGoals),
+      statTile(scorers[0] ? scorers[0].p.name : "—", t.statTopScorer),
+    ]);
+
+    // الهدّافون
+    const scorersEl = scorers.length
+      ? el("div.table-wrap", {}, [el("table.standings", {}, [
+          el("thead", {}, [el("tr", {}, [el("th.rank-col", { text: "#" }), el("th.team-col", { text: t.th_player }), el("th", { text: t.th_team }), el("th.pts-col", { text: "⚽" })])]),
+          el("tbody", {}, scorers.map((s, i) => el("tr" + (i === 0 ? ".champion" : ""), {}, [
+            el("td", {}, [el("span.rank", { text: String(i + 1) })]),
+            el("td.team-col", {}, [el("span.team-name", { text: s.p.name })]),
+            el("td", {}, [el("span.stat-team", { text: teamName(s.p.team_id) })]),
+            el("td", {}, [el("span.pts", { text: String(s.goals) })]),
+          ]))),
+        ])])
+      : el("p.page-sub", { style: "padding:8px 2px", text: t.noScorersYet });
+
+    // البطاقات
+    const cardsEl = cards.length
+      ? el("div.table-wrap", {}, [el("table.standings", {}, [
+          el("thead", {}, [el("tr", {}, [el("th.team-col", { text: t.th_player }), el("th", { text: t.th_team }), el("th", { text: "🟨" }), el("th", { text: "🟥" })])]),
+          el("tbody", {}, cards.map((c) => el("tr", {}, [
+            el("td.team-col", {}, [el("span.team-name", { text: c.p.name })]),
+            el("td", {}, [el("span.stat-team", { text: teamName(c.p.team_id) })]),
+            el("td", { text: String(c.y) }),
+            el("td", { text: String(c.r) }),
+          ]))),
+        ])])
+      : el("p.page-sub", { style: "padding:8px 2px", text: t.noCardsYet });
+
+    // إحصائيات الفرق (الأهداف)
+    const teamStatsEl = el("div.table-wrap", {}, [el("table.standings", {}, [
+      el("thead", {}, [el("tr", {}, [el("th.rank-col", { text: "#" }), el("th.team-col", { text: t.th_team }), el("th.stat-col", { text: t.th_played }), el("th.stat-col", { text: t.th_gf }), el("th.stat-col", { text: t.th_ga }), el("th.stat-col", { text: t.th_gd })])]),
+      el("tbody", {}, teamRows.map((r, i) => el("tr" + (i === 0 && r.gf > 0 ? ".champion" : ""), {}, [
+        el("td", {}, [el("span.rank", { text: String(i + 1) })]),
+        el("td.team-col", {}, [el("span.team-name", { text: r.team.name })]),
+        el("td", { text: String(r.played) }),
+        el("td", {}, [el("span.pts", { text: String(r.gf) })]),
+        el("td", { text: String(r.ga) }),
+        el("td.pos-diff" + (r.gd > 0 ? ".pos" : r.gd < 0 ? ".neg" : ""), { text: (r.gd > 0 ? "+" : "") + r.gd }),
+      ]))),
+    ])]);
+
+    mount(content,
+      tiles,
+      el("div.stats-section", {}, [el("h3.mp-title", {}, [el("span", { text: "⚽ " }), t.topScorers]), scorersEl,
+        el("p.set-hint", { style: "margin-top:8px", text: t.goalsNote })]),
+      el("div.stats-section", {}, [el("h3.mp-title", {}, [el("span", { text: "🟨 " }), t.cardsTable]), cardsEl]),
+      el("div.stats-section", {}, [el("h3.mp-title", {}, [el("span", { text: "📊 " }), t.teamStats]), teamStatsEl]),
+    );
+  }
+
+  rerender();
+  return wrap;
 }
 
 // ---- تبويب الفرق (كل البيوت وفرقها) ---------------------------------------
 
 function renderTeams(state) {
   const { bundle, tournament } = state;
-  const groups = bundle.groups.length ? bundle.groups : [{ id: null, name: t.teamsTab }];
   const wrap = el("div");
   let any = false;
-  for (const g of groups) {
-    const groupTeams = bundle.teams.filter((x) => x.group_id === g.id)
-      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    if (!groupTeams.length) continue;
+
+  const teamCard = (tm) => {
+    const count = (bundle.players || []).filter((p) => p.team_id === tm.id && (p.role || "player") === "player").length;
+    return el("a.team-card", { href: `#/t/${tournament.id}/team/${tm.id}` }, [
+      el("span.team-card-name", { text: tm.name }),
+      el("span.team-card-sub", { text: count ? `${count} ${t.squadPlayers}` : t.viewSquad }),
+      el("span.match-go", { "aria-hidden": "true", text: "‹" }),
+    ]);
+  };
+  const section = (title, teams) => {
+    if (!teams.length) return;
     any = true;
     const grid = el("div.teams-grid");
-    for (const tm of groupTeams) {
-      const count = (bundle.players || []).filter((p) => p.team_id === tm.id && (p.role || "player") === "player").length;
-      grid.appendChild(el("a.team-card", { href: `#/t/${tournament.id}/team/${tm.id}` }, [
-        el("span.team-card-name", { text: tm.name }),
-        el("span.team-card-sub", { text: count ? `${count} ${t.squadPlayers}` : t.viewSquad }),
-        el("span.match-go", { "aria-hidden": "true", text: "‹" }),
-      ]));
-    }
+    for (const tm of teams.slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))) grid.appendChild(teamCard(tm));
     wrap.appendChild(el("div.standings-block", {}, [
-      el("div.standings-title", {}, [el("span", { text: "🏠" }), el("span", { text: g.name })]),
+      el("div.standings-title", {}, [el("span", { text: "🏠" }), el("span", { text: title })]),
       grid,
     ]));
-  }
+  };
+
+  for (const g of bundle.groups) section(g.name, bundle.teams.filter((x) => x.group_id === g.id));
+  // الفرق «بدون بيت» (دوري فردي/خروج المغلوب/غير مُسندة)
+  section(bundle.groups.length ? t.noGroup : t.teamsTab, bundle.teams.filter((x) => x.group_id == null));
+
   if (!any) return emptyState("👥", t.noTeamsYet);
   return wrap;
 }

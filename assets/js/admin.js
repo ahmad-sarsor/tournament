@@ -154,6 +154,7 @@ async function renderTournamentAdmin(id, tab) {
 
   const tabs = el("div.tabs", {}, [
     adminTab(t.editTournament, id, "details", tab),
+    adminTab(t.teamsTab, id, "teams", tab),
     adminTab(t.manageGroups, id, "groups", tab),
     adminTab(t.manageMatches, id, "matches", tab),
   ]);
@@ -163,7 +164,8 @@ async function renderTournamentAdmin(id, tab) {
     el("div.page-head", { style: "margin-top:10px" }, [el("h1.page-title", { text: tournament.name })]),
     tabs, content);
 
-  if (tab === "groups") renderGroupsTab(content, state);
+  if (tab === "teams") renderTeamsAdmin(content, state);
+  else if (tab === "groups") renderGroupsAdmin(content, state);
   else if (tab === "matches") renderMatchesTab(content, state);
   else renderDetailsTab(content, state);
 }
@@ -232,44 +234,63 @@ function tournamentForm(existing) {
   });
 }
 
-// ---- تبويب البيوت والفرق ---------------------------------------------------
+// ---- تبويب الفرق (قائمة مسطّحة، كل فريق يُسند لأي بيت) ----------------------
 
-function renderGroupsTab(host, state) {
+function renderTeamsAdmin(host, state) {
+  const { tournament, groups, teams } = state;
+  const groupById = new Map(groups.map((g) => [g.id, g]));
+  const wrap = el("div", {}, [
+    el("p.page-sub", { style: "margin-bottom:12px", text: "كل الفرق. عدّل بيت كل فريق من زرّ التعديل (اتركه «بدون بيت» لخروج المغلوب أو الدوري الفردي)." }),
+    el("div", { style: "margin-bottom:16px" }, [
+      el("button.btn.btn-primary", { text: "＋ " + t.addTeam, onclick: () => teamForm(tournament.id, groups, null) }),
+    ]),
+  ]);
+  if (!teams.length) wrap.appendChild(emptyState("👥", "أضف فرق البطولة"));
+
+  const sorted = teams.slice().sort((a, b) =>
+    ((groupById.get(a.group_id)?.sort_order ?? 9999) - (groupById.get(b.group_id)?.sort_order ?? 9999)) ||
+    (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  for (const tm of sorted) {
+    const g = groupById.get(tm.group_id);
+    const pcount = (state.players || []).filter((p) => p.team_id === tm.id).length;
+    wrap.appendChild(el("div.admin-list-item", {}, [
+      el("div.grow", {}, [
+        el("div", { style: "font-weight:700", text: tm.name }),
+        el("div.sub", { style: "display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px" }, [
+          g ? el("span.badge.badge-active", { text: g.name }) : el("span.badge.badge-upcoming", { text: t.noGroup }),
+          el("span", { text: `${pcount} ${t.players}` }),
+        ]),
+      ]),
+      el("button.btn.btn-sm.btn-outline", { text: "👥", title: t.players, onclick: () => playersModal(state, tm) }),
+      el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => teamForm(tournament.id, groups, tm) }),
+      el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeTeam(tm) }),
+    ]));
+  }
+  mount(host, wrap);
+}
+
+// ---- تبويب البيوت (المجموعات فقط) -----------------------------------------
+
+function renderGroupsAdmin(host, state) {
   const { tournament, groups, teams } = state;
   const wrap = el("div", {}, [
+    el("p.page-sub", { style: "margin-bottom:12px", text: "البيوت (المجموعات). للدوري الفردي أو خروج المغلوب يمكن تركها فارغة." }),
     el("div", { style: "margin-bottom:16px" }, [
       el("button.btn.btn-primary", { text: "＋ " + t.addGroup, onclick: () => groupForm(tournament.id, null) }),
     ]),
   ]);
+  if (!groups.length) wrap.appendChild(emptyState("🏠", "لا توجد بيوت (اختياري)"));
 
-  if (!groups.length) wrap.appendChild(emptyState("🏠", "أضف بيتاً (مجموعة) للبدء"));
-
-  for (const g of groups) {
-    const groupTeams = teams.filter((x) => x.group_id === g.id);
-    const teamList = el("div");
-    if (!groupTeams.length) teamList.appendChild(el("p.page-sub", { style: "padding:6px 2px", text: "لا توجد فرق في هذا البيت" }));
-    for (const tm of groupTeams) {
-      const pcount = (state.players || []).filter((p) => p.team_id === tm.id).length;
-      teamList.appendChild(el("div.admin-list-item", { style: "padding:8px 12px" }, [
-        el("div.grow", {}, [
-          el("div", { style: "font-weight:700", text: tm.name }),
-          el("div.sub", { text: `${pcount} ${t.players}` }),
-        ]),
-        el("button.btn.btn-sm.btn-outline", { text: "👥 " + t.players, onclick: () => playersModal(state, tm) }),
-        el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => teamForm(tournament.id, groups, tm) }),
-        el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeTeam(tm) }),
-      ]));
-    }
-    wrap.appendChild(el("div.card.card-pad", { style: "margin-bottom:14px" }, [
-      el("div", { style: "display:flex;align-items:center;justify-content:space-between;margin-bottom:10px" }, [
-        el("h3", { style: "font-weight:800", text: g.name }),
-        el("div", { style: "display:flex;gap:6px" }, [
-          el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => groupForm(tournament.id, g) }),
-          el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeGroup(g) }),
-        ]),
+  const sorted = groups.slice().sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  for (const g of sorted) {
+    const count = teams.filter((x) => x.group_id === g.id).length;
+    wrap.appendChild(el("div.admin-list-item", {}, [
+      el("div.grow", {}, [
+        el("div", { style: "font-weight:700", text: g.name }),
+        el("div.sub", { text: `${count} فريق` }),
       ]),
-      teamList,
-      el("button.btn.btn-sm.btn-outline", { style: "margin-top:10px", text: "＋ " + t.addTeam, onclick: () => teamForm(tournament.id, groups, null, g.id) }),
+      el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => groupForm(tournament.id, g) }),
+      el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeGroup(g) }),
     ]));
   }
   mount(host, wrap);
@@ -537,8 +558,9 @@ function resultModal(m) {
 
 async function generateFixtures(state) {
   const { tournament, groups, teams, matches } = state;
-  const playable = groups.filter((g) => teams.filter((x) => x.group_id === g.id).length >= 2);
-  if (!playable.length) return toast(t.needTeams, "err");
+  // نتحقّق من وجود مجموعة (بيت أو «بدون بيت») فيها فريقان على الأقل
+  const buckets = [...groups.map((g) => teams.filter((x) => x.group_id === g.id)), teams.filter((x) => x.group_id == null)];
+  if (!buckets.some((b) => b.length >= 2)) return toast(t.needTeams, "err");
   const msg = matches.length ? t.fixturesExistWarn + "\n\nمتابعة؟" : "توليد مباريات دوري كامل لكل بيت؟";
   if (!(await confirmDialog(msg, { danger: false, confirmText: t.confirm }))) return;
   try {

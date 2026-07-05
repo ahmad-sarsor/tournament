@@ -368,13 +368,17 @@ export function roundRobinPairs(teamIds) {
 export function buildFixtures(tournamentId, groups, teams) {
   const rows = [];
   let order = 0;
-  for (const g of groups) {
-    const groupTeams = teams.filter((t) => t.group_id === g.id);
-    const rounds = roundRobinPairs(groupTeams.map((t) => t.id));
+  // كل بيت مجموعة، بالإضافة إلى مجموعة ضمنية للفرق «بدون بيت» (دوري فردي/خروج المغلوب)
+  const buckets = [
+    ...groups.map((g) => ({ id: g.id, ids: teams.filter((t) => t.group_id === g.id).map((t) => t.id) })),
+    { id: null, ids: teams.filter((t) => t.group_id == null).map((t) => t.id) },
+  ];
+  for (const b of buckets) {
+    const rounds = roundRobinPairs(b.ids);
     rounds.forEach((pairs, ri) => {
       for (const [home, away] of pairs) {
         rows.push({
-          tournament_id: tournamentId, group_id: g.id, round: ri + 1,
+          tournament_id: tournamentId, group_id: b.id, round: ri + 1,
           home_team_id: home, away_team_id: away, status: "scheduled", sort_order: order++,
         });
       }
