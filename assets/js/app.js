@@ -407,25 +407,18 @@ async function renderTeamDetail(id, teamId) {
 
 // ---- تبويب البرنامج --------------------------------------------------------
 
-// تاريخ اليوم محليّاً بصيغة YYYY-MM-DD لمقارنته بـ match_date المخزّن
-function localTodayISO() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
+// مفتاح يوم المباراة كما يستخدمه groupByDay (غير المجدولة ← "—")
+const dayKeyOf = (m) => m.match_date || "—";
 
-// «يوم المِرساة»: نبدأ العرض منه بأولوية (مباشر ← اليوم ← أقرب يوم قادم ← آخر يوم)
-// المباريات واردة مرتّبة تصاعدياً حسب التاريخ (byMatchOrder)
+// «يوم المِرساة»: أوّل مباراة لم تُلعب بعد (الأقرب زمنياً لأن المباريات مرتّبة تصاعدياً).
+// نعتمد على الحالة لا على التاريخ: مباشر الآن ← أوّل مباراة غير ملعوبة ← (لُعبت كلها) آخر يوم.
 function pickAnchorDate(matches) {
-  const dated = matches.filter((m) => m.match_date);        // المجدولة فقط
-  if (!dated.length) return null;                            // لا تواريخ ← نبقى في الأعلى
-  const live = dated.find((m) => m.status === "live");
-  if (live) return live.match_date;                         // ١) مباراة مباشرة الآن
-  const today = localTodayISO();
-  if (dated.some((m) => m.match_date === today)) return today; // ٢) مباريات اليوم
-  const upcoming = dated.find((m) => m.match_date > today);
-  if (upcoming) return upcoming.match_date;                 // ٣) أقرب يوم قادم
-  return dated[dated.length - 1].match_date;                // ٤) انتهت كلها ← أحدث يوم
+  if (!matches.length) return null;
+  const live = matches.find((m) => m.status === "live");
+  if (live) return dayKeyOf(live);                     // ١) مباراة مباشرة الآن
+  const next = matches.find((m) => !isCounted(m));     // ٢) أوّل مباراة لم تُلعب بعد
+  if (next) return dayKeyOf(next);
+  return dayKeyOf(matches[matches.length - 1]);        // ٣) لُعبت كلها ← آخر يوم
 }
 
 // التمرير إلى يوم محدّد داخل القائمة (scroll-margin في CSS يترك هامش الترويسة الثابتة)
