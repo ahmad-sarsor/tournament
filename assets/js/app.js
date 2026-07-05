@@ -21,6 +21,10 @@ document.getElementById("settings-btn")?.addEventListener("click", () => openSet
 let currentUnsub = null;              // إلغاء اشتراك التحديث اللحظي الحالي
 function cleanup() { if (currentUnsub) { currentUnsub(); currentUnsub = null; } }
 
+// تمرير تلقائي لبرنامج المباريات عند فتح التبويب فقط (لا مع التحديث اللحظي)
+let scheduleAnchorPending = false;
+function consumeAnchorPending() { const v = scheduleAnchorPending; scheduleAnchorPending = false; return v; }
+
 // ---- التوجيه (Hash routing) -----------------------------------------------
 
 function parseHash() {
@@ -126,6 +130,7 @@ async function renderTournament(id, tab) {
     el("a.btn.btn-outline", { href: "#/", text: t.backToTournaments }));
 
   const state = { tournament, bundle: await fetchTournamentBundle(id), tab };
+  scheduleAnchorPending = true;         // فتح جديد للصفحة ← اسمح بالتمرير التلقائي في البرنامج
   renderTournamentShell(state);
 
   // تحديث لحظي: أعِد جلب البيانات وأعِد رسم الصفحة (بما فيها بيانات البطولة نفسها)
@@ -402,6 +407,34 @@ async function renderTeamDetail(id, teamId) {
 
 // ---- تبويب البرنامج --------------------------------------------------------
 
+// تاريخ اليوم محليّاً بصيغة YYYY-MM-DD لمقارنته بـ match_date المخزّن
+function localTodayISO() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// «يوم المِرساة»: نبدأ العرض منه بأولوية (مباشر ← اليوم ← أقرب يوم قادم ← آخر يوم)
+// المباريات واردة مرتّبة تصاعدياً حسب التاريخ (byMatchOrder)
+function pickAnchorDate(matches) {
+  const dated = matches.filter((m) => m.match_date);        // المجدولة فقط
+  if (!dated.length) return null;                            // لا تواريخ ← نبقى في الأعلى
+  const live = dated.find((m) => m.status === "live");
+  if (live) return live.match_date;                         // ١) مباراة مباشرة الآن
+  const today = localTodayISO();
+  if (dated.some((m) => m.match_date === today)) return today; // ٢) مباريات اليوم
+  const upcoming = dated.find((m) => m.match_date > today);
+  if (upcoming) return upcoming.match_date;                 // ٣) أقرب يوم قادم
+  return dated[dated.length - 1].match_date;                // ٤) انتهت كلها ← أحدث يوم
+}
+
+// التمرير إلى يوم محدّد داخل القائمة (scroll-margin في CSS يترك هامش الترويسة الثابتة)
+function scrollToDay(container, date, behavior = "auto") {
+  const target = date && container.querySelector(`.day-group[data-date="${date}"]`);
+  if (target) target.scrollIntoView({ block: "start", behavior });
+  else window.scrollTo({ top: 0, behavior });
+}
+
 function renderSchedule(state) {
   const { bundle, tournament } = state;
   const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
@@ -412,15 +445,22 @@ function renderSchedule(state) {
   let activeGroup = "all";
   const listHost = el("div");
   const chips = el("div.filters");
-  const rerenderList = () => {
-    const matches = activeGroup === "all"
-      ? bundle.matches
-      : bundle.matches.filter((m) => m.group_id === activeGroup);
+  const currentMatches = () => activeGroup === "all"
+    ? bundle.matches
+    : bundle.matches.filter((m) => m.group_id === activeGroup);
+  const rerenderList = (scrollToAnchor) => {
+    const matches = currentMatches();
     mount(listHost, renderScheduleDays(matches, teamById, groupById, { tid: tournament.id }));
+    if (scrollToAnchor) {
+      const date = pickAnchorDate(matches);
+      // بعد أن يُنفّذ route() الأمر scrollTo(0,0)، لذا نؤجّل لإطار العرض التالي
+      requestAnimationFrame(() => scrollToDay(listHost, date));
+    }
   };
   const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
     text: label,
-    onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerenderList(); },
+    // تغيير الفلتر ← نعيد الانتقال لليوم المناسب داخل نتائج البيت المختار
+    onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerenderList(true); },
   });
   if (bundle.groups.length > 1) {
     chips.appendChild(makeChip(t.allGroups, "all"));
@@ -428,7 +468,17 @@ function renderSchedule(state) {
     wrap.appendChild(chips);
   }
   wrap.appendChild(listHost);
-  rerenderList();
+
+  // زر عائم للرجوع إلى «اليوم» (المِرساة) — يظهر فقط عند وجود مباريات مجدولة
+  if (pickAnchorDate(bundle.matches)) {
+    wrap.appendChild(el("button.jump-today", {
+      type: "button", title: t.jumpToday, "aria-label": t.jumpToday,
+      onclick: () => scrollToDay(listHost, pickAnchorDate(currentMatches()), "smooth"),
+    }, [el("span.jt-ico", { text: "📍" }), el("span.jt-txt", { text: t.jumpToday })]));
+  }
+
+  // تمرير تلقائي عند فتح التبويب فقط (لا مع التحديث اللحظي الذي يعيد الرسم)
+  rerenderList(consumeAnchorPending());
   return wrap;
 }
 

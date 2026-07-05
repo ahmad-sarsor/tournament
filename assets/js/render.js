@@ -108,7 +108,7 @@ export function renderScheduleDays(matches, teamById, groupById, extra = {}) {
       date !== "—" ? el("span.date", { text: formatDate(date) }) : null,
       el("span.line"),
     ]);
-    const wrap = el("div.day-group", {}, [head]);
+    const wrap = el("div.day-group", { dataset: { date } }, [head]);
     for (const m of dayMatches) wrap.appendChild(matchCard(m, teamById, groupById, { tid }));
     frag.appendChild(wrap);
   }

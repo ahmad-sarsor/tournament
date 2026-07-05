@@ -25,6 +25,7 @@ export const t = {
   live: "مباشر",
   vs: "×",
   noMatches: "لا توجد مباريات بعد",
+  jumpToday: "اليوم",
 
   // الترتيب
   th_rank: "#",
