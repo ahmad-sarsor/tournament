@@ -567,7 +567,7 @@ async function renderMatchDetail(id, matchId) {
       ]),
       el("div.mp-section", {}, [
         el("h3.mp-title", { text: t.events }),
-        events.length ? el("div.card", {}, [eventsTimeline(events, playersById, teamById)])
+        events.length ? el("div.card", {}, [eventsTimeline(events, playersById, teamById, { homeId: match.home_team_id, awayId: match.away_team_id })])
                       : el("p.page-sub", { style: "padding:6px 2px", text: t.noEvents }),
       ]),
     );

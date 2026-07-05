@@ -38,22 +38,28 @@ function formGuide(results) {
 export function eventIcon(type) { return { goal: "⚽", yellow: "🟨", red: "🟥" }[type] || "•"; }
 export function eventTypeLabel(type) { return t["ev_" + type] || type; }
 
-// خطّ زمني للأحداث (أهداف/بطاقات) — مرتّب مسبقاً
-export function eventsTimeline(events, playersById, teamById) {
-  const list = el("ul.timeline");
+// أحداث المباراة بأسلوب 365: كل حدث في جهة فريقه (المضيف يميناً، الضيف يساراً)،
+// والدقيقة في المنتصف. events مرتّبة مسبقاً حسب الدقيقة.
+export function eventsTimeline(events, playersById, teamById, opts = {}) {
+  const { homeId, awayId } = opts;
+  const wrap = el("div.mp-events");
   for (const e of events) {
     const p = e.player_id ? playersById.get(e.player_id) : null;
-    const tm = teamById.get(e.team_id);
-    list.appendChild(el("li.tl-item.tl-" + e.type, {}, [
-      el("span.tl-min", { text: e.minute != null ? e.minute + "'" : "—" }),
-      el("span.tl-ico", { text: eventIcon(e.type) }),
-      el("span.tl-txt", {}, [
-        el("span.tl-player", { text: p ? p.name : t.unknownPlayer }),
-        tm ? el("span.tl-team", { text: tm.name }) : null,
-      ]),
+    const isAway = awayId != null && e.team_id === awayId; // غير ذلك ← جهة المضيف
+    const item = el("span.ev-item.ev-" + e.type, {}, [
+      el("span.ev-ico", { text: eventIcon(e.type) }),
+      el("span.ev-player", { text: p ? p.name : t.unknownPlayer }),
+    ]);
+    const homeCell = el("div.ev-cell.ev-cell-home");
+    const awayCell = el("div.ev-cell.ev-cell-away");
+    (isAway ? awayCell : homeCell).appendChild(item);
+    wrap.appendChild(el("div.ev-row" + (e.type === "red" ? ".ev-row-red" : ""), {}, [
+      homeCell,
+      el("span.ev-min", { text: e.minute != null ? e.minute + "'" : "—" }),
+      awayCell,
     ]));
   }
-  return list;
+  return wrap;
 }
 
 // بطاقة مباراة (رابط يفتح صفحة المباراة عند وجود tid) — مضغوطة بأسلوب 365

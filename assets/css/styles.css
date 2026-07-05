@@ -393,6 +393,28 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
 .tl-team { color: var(--text-3); font-size: .78rem; }
 .tl-item.tl-red { background: color-mix(in srgb, var(--loss) 6%, transparent); }
 
+/* أحداث المباراة بأسلوب 365: جهتان (المضيف يميناً / الضيف يساراً) والدقيقة في المنتصف */
+.mp-events { position: relative; display: flex; flex-direction: column; }
+.mp-events::before {
+  content: ""; position: absolute; top: 8px; bottom: 8px; left: 50%; width: 2px;
+  transform: translateX(-50%); background: var(--border); border-radius: 2px; z-index: 0;
+}
+.ev-row { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 9px 4px; }
+.ev-row + .ev-row { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.ev-row-red { background: color-mix(in srgb, var(--loss) 7%, transparent); border-radius: 8px; }
+.ev-cell { display: flex; min-width: 0; }
+.ev-cell-home { justify-content: flex-end; }
+.ev-cell-away { justify-content: flex-start; }
+.ev-min {
+  min-width: 30px; text-align: center; font-weight: 800; font-size: .78rem;
+  color: var(--text-2); font-variant-numeric: tabular-nums;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 3px 7px;
+}
+.ev-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; }
+.ev-cell-home .ev-item { flex-direction: row-reverse; } /* الأيقونة تلاصق خطّ المنتصف */
+.ev-ico { font-size: 1.02rem; line-height: 1; flex-shrink: 0; }
+.ev-player { min-width: 0; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ===== لوحة الإدارة المباشرة ============================================= */
 .live-console { max-width: 640px; margin: 0 auto; }
 .lc-scoreboard {
