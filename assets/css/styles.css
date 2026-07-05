@@ -176,7 +176,7 @@ img { max-width: 100%; }
 /* ===== البرنامج (المباريات) ============================================== */
 .day-group { margin-bottom: 28px; }
 /* هامش عند التمرير التلقائي إلى يوم، حتى لا يختبئ عنوانه خلف الترويسة الثابتة */
-.day-group { scroll-margin-top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + 14px); }
+.day-group, .day-head { scroll-margin-top: calc(var(--header-h) + env(safe-area-inset-top, 0px) + 14px); }
 
 .day-head { display: flex; align-items: center; gap: 10px; margin: 0 2px 12px; font-weight: 700; font-size: .95rem; color: var(--ink); }
 .day-head .date { color: var(--text-3); font-weight: 600; font-size: .8rem; }

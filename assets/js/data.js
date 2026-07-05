@@ -39,12 +39,27 @@ function byMatchOrder(a, b) {
 
 // ---- القراءة (عامّة) -------------------------------------------------------
 
+const byTournamentOrder = (a, b) =>
+  (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
+  String(b.start_date || "").localeCompare(String(a.start_date || ""));
+
 export async function fetchTournaments() {
   const snap = await getDocs(collection(requireDb(), "tournaments"));
-  return mapDocs(snap).sort(
-    (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
-      String(b.start_date || "").localeCompare(String(a.start_date || ""))
-  );
+  return mapDocs(snap).sort(byTournamentOrder);
+}
+
+// التورنيرات التي يديرها البريد: يملكها أو معيَّن مديراً فيها (لصفحة إدارة العضو)
+export async function fetchMyTournaments(email) {
+  if (!email) return [];
+  const d = requireDb();
+  const [owned, adminOf] = await Promise.all([
+    getDocs(query(collection(d, "tournaments"), where("owner_email", "==", email))),
+    // admin_emails مخزّنة بحروف صغيرة (كما تقارنها القاعدة بـ uemail().lower())
+    getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", email.toLowerCase()))),
+  ]);
+  const byId = new Map();
+  for (const doc of [...mapDocs(owned), ...mapDocs(adminOf)]) byId.set(doc.id, doc);
+  return [...byId.values()].sort(byTournamentOrder);
 }
 
 export async function fetchTournament(id) {
@@ -200,20 +215,30 @@ export function onAuthChange(cb) {
   return () => authCbs.delete(cb);
 }
 
-// ---- إدارة المدراء (المالك فقط) -------------------------------------------
+// ---- الأدوار: مالك / مدير منصّة / عضو معتمَد (المالك وحده يعتمد ويمنح) -------
 
 export function isOwnerEmail(email) {
   const e = String(email || "").toLowerCase();
   return OWNER_EMAILS.some((o) => String(o).toLowerCase() === e);
 }
 
-// هل المستخدم الحالي مدير؟ (المالك دائماً، أو بريده في admins). قراءة وثيقته مسموحة بالقواعد.
-export async function amIAdmin() {
+async function hasDoc(coll, id) {
+  try { return (await getDoc(doc(requireDb(), coll, id))).exists(); }
+  catch { return false; }
+}
+
+// مدير منصّة: المالك دائماً، أو بريده في admins (صلاحيات على كل التورنيرات)
+export async function amIPlatformAdmin() {
   const u = currentUser;
   if (!u || !u.email) return false;
-  if (isOwnerEmail(u.email)) return true;
-  try { return (await getDoc(doc(requireDb(), "admins", u.email))).exists(); }
-  catch { return false; }
+  return isOwnerEmail(u.email) || hasDoc("admins", u.email);
+}
+
+// عضو معتمَد: بريده في members (يُنشئ تورنيرات). فحص وثيقته فقط دون تكرار فحص المنصّة.
+export async function isInMembers() {
+  const u = currentUser;
+  if (!u || !u.email) return false;
+  return hasDoc("members", u.email);
 }
 
 export async function fetchUsers() {
@@ -225,10 +250,19 @@ export async function fetchAdminEmails() {
   const snap = await getDocs(collection(requireDb(), "admins"));
   return new Set(snap.docs.map((d) => d.id));
 }
+export async function fetchMemberEmails() {
+  const snap = await getDocs(collection(requireDb(), "members"));
+  return new Set(snap.docs.map((d) => d.id));
+}
 
-// تعيين/إزالة مدير — المفتاح هو البريد كما هو (يطابق token.email للمستخدم)
+// المفتاح هو البريد كما هو (يطابق token.email للمستخدم)
 export async function setAdmin(email, on) {
   const ref = doc(requireDb(), "admins", email);
+  if (on) await setDoc(ref, clean({ email, added_at: Date.now() }));
+  else await deleteDoc(ref);
+}
+export async function setMember(email, on) {
+  const ref = doc(requireDb(), "members", email);
   if (on) await setDoc(ref, clean({ email, added_at: Date.now() }));
   else await deleteDoc(ref);
 }
@@ -252,8 +286,11 @@ async function nullifyWhere(coll, field, value) {
 }
 
 export async function createTournament(p) {
-  const ref = await addDoc(collection(requireDb(), "tournaments"), clean(p));
-  return { id: ref.id, ...p };
+  // منشئ التورنير = مالكه (تفرضه القواعد: owner_email == بريد المُنشئ)
+  const data = { ...p };
+  if (!data.owner_email && currentUser?.email) data.owner_email = currentUser.email;
+  const ref = await addDoc(collection(requireDb(), "tournaments"), clean(data));
+  return { id: ref.id, ...data };
 }
 export async function updateTournament(id, patch) {
   await updateDoc(doc(requireDb(), "tournaments", id), clean(patch));

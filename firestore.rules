@@ -1,39 +1,46 @@
 rules_version = '2';
 
 // ============================================================================
-//  قواعد أمان Firestore
-//  القراءة متاحة للجميع (عرض عام). الكتابة متاحة فقط لحساب/حسابات المدير.
-//
-//  ⚠️ مهم جداً: ضع بريد المدير في القائمة أدناه (نفس البريد الذي أنشأته في
-//  Firebase Authentication). بدون ذلك لن يستطيع أحد التعديل — وبِقيمة خاطئة
-//  قد يتمكّن أي مستخدم مسجَّل من التعديل. لا تكتفِ بـ (request.auth != null).
-//
-//  انسخ هذا الملف إلى: Firebase Console → Firestore Database → Rules → Publish
+//  قواعد أمان Firestore — نموذج متعدّد المستأجرين
+//  الأدوار:
+//   • المالك (owner): مثبَّت أدناه. كل الصلاحيات + اعتماد الأعضاء ومنح مدراء المنصّة.
+//   • مدير منصّة (platform admin): في admins/{email} — يعدّل كل التورنيرات. يمنحه المالك.
+//   • عضو معتمَد (member): في members/{email} — يُنشئ تورنيرات ويملكها. يعتمده المالك.
+//   • مدير تورنير: بريده في admin_emails للتورنير — يعدّل ذلك التورنير فقط.
+//   القراءة عامّة (عرض للزوّار). النشر: Firebase Console → Firestore → Rules → Publish
 // ============================================================================
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ✍️ بريد/بُرد «المالك»: الوحيد القادر على تعيين/إزالة المدراء (super-admin)
-    function ownerEmails() {
-      return ['ahmad.kefah11sar@gmail.com'];
-    }
+    // ✍️ بريد/بُرد «المالك»
+    function ownerEmails() { return ['ahmad.kefah11sar@gmail.com']; }
 
-    function isOwner() {
-      return request.auth != null
-        && request.auth.token.email != null
-        && request.auth.token.email in ownerEmails();
-    }
-
-    // مدير = المالك، أو بريده مُسجَّل في مجموعة admins (يعيّنه المالك من لوحة الإدارة)
-    function isAdmin() {
+    function uemail() { return request.auth != null ? request.auth.token.email : null; }
+    function isOwner() { return uemail() != null && uemail() in ownerEmails(); }
+    function isPlatformAdmin() {
       return isOwner()
-        || (request.auth != null && request.auth.token.email != null
-            && exists(/databases/$(database)/documents/admins/$(request.auth.token.email)));
+        || (uemail() != null && exists(/databases/$(database)/documents/admins/$(uemail())));
+    }
+    function isMember() {
+      return isPlatformAdmin()
+        || (uemail() != null && exists(/databases/$(database)/documents/members/$(uemail())));
     }
 
-    // اقتراح صالح للإضافة من الزائر (بلا تسجيل): نص إلزامي ومحدود الطول،
-    // ولا يُسمح إلا بالحقول المعروفة (منعاً للعبث).
+    // صلاحية التعديل داخل تورنير معطى (بمعطياته d): منصّة، أو مالكه، أو مدير معيّن فيه
+    function canEditT(d) {
+      return isPlatformAdmin()
+        || (uemail() != null && (d.owner_email == uemail()
+            || (d.admin_emails is list && uemail().lower() in d.admin_emails)));
+    }
+    function tData(tid) {
+      return get(/databases/$(database)/documents/tournaments/$(tid)).data;
+    }
+    function parentAllows(tid) {
+      return exists(/databases/$(database)/documents/tournaments/$(tid)) && canEditT(tData(tid));
+    }
+
+    // اقتراح صالح للإضافة من الزائر (بلا تسجيل)
     function isValidSuggestion() {
       let d = request.resource.data;
       return d.keys().hasOnly(['text', 'name', 'context', 'created_at'])
@@ -43,34 +50,84 @@ service cloud.firestore {
         && (!('created_at' in d) || d.created_at is number);
     }
 
-    match /tournaments/{id} { allow read: if true; allow write: if isAdmin(); }
-    match /groups/{id}      { allow read: if true; allow write: if isAdmin(); }
-    match /teams/{id}       { allow read: if true; allow write: if isAdmin(); }
-    match /matches/{id}     { allow read: if true; allow write: if isAdmin(); }
-    match /players/{id}     { allow read: if true; allow write: if isAdmin(); }
-    match /events/{id}      { allow read: if true; allow write: if isAdmin(); }
+    // ---- البطولات ----------------------------------------------------------
+    match /tournaments/{id} {
+      allow read: if true;
+      // ينشئها عضو معتمَد ويضع نفسه مالكاً
+      allow create: if isMember() && request.resource.data.owner_email == uemail();
+      // التعديل: من له صلاحية داخلها؛ لا يتغيّر المالك، وقائمة مدراء التورنير
+      // لا يعدّلها إلا المالك/مدير المنصّة (لا مدير التورنير)
+      allow update: if canEditT(resource.data)
+        && request.resource.data.owner_email == resource.data.owner_email
+        && (request.resource.data.get('admin_emails', []) == resource.data.get('admin_emails', [])
+            || isPlatformAdmin() || resource.data.owner_email == uemail());
+      // الحذف: مالك التورنير أو منصّة فقط
+      allow delete: if isPlatformAdmin() || (uemail() != null && resource.data.owner_email == uemail());
+    }
 
-    // صندوق الاقتراحات: الزائر يضيف فقط (بلا قراءة)، والمدير يقرأ ويحذف.
+    // ---- بيانات التورنير: تُقيَّد بصلاحية التورنير الأب (عبر tournament_id) ----
+    match /groups/{id} {
+      allow read: if true;
+      allow create: if parentAllows(request.resource.data.tournament_id);
+      allow update: if parentAllows(resource.data.tournament_id)
+        && request.resource.data.tournament_id == resource.data.tournament_id;
+      allow delete: if parentAllows(resource.data.tournament_id);
+    }
+    match /teams/{id} {
+      allow read: if true;
+      allow create: if parentAllows(request.resource.data.tournament_id);
+      allow update: if parentAllows(resource.data.tournament_id)
+        && request.resource.data.tournament_id == resource.data.tournament_id;
+      allow delete: if parentAllows(resource.data.tournament_id);
+    }
+    match /matches/{id} {
+      allow read: if true;
+      allow create: if parentAllows(request.resource.data.tournament_id);
+      allow update: if parentAllows(resource.data.tournament_id)
+        && request.resource.data.tournament_id == resource.data.tournament_id;
+      allow delete: if parentAllows(resource.data.tournament_id);
+    }
+    match /players/{id} {
+      allow read: if true;
+      allow create: if parentAllows(request.resource.data.tournament_id);
+      allow update: if parentAllows(resource.data.tournament_id)
+        && request.resource.data.tournament_id == resource.data.tournament_id;
+      allow delete: if parentAllows(resource.data.tournament_id);
+    }
+    match /events/{id} {
+      allow read: if true;
+      allow create: if parentAllows(request.resource.data.tournament_id);
+      allow update: if parentAllows(resource.data.tournament_id)
+        && request.resource.data.tournament_id == resource.data.tournament_id;
+      allow delete: if parentAllows(resource.data.tournament_id);
+    }
+
+    // ---- صندوق الاقتراحات ---------------------------------------------------
     match /suggestions/{id} {
       allow create: if isValidSuggestion();
-      allow read, delete: if isAdmin();
+      allow read, delete: if isPlatformAdmin();
       allow update: if false;
     }
 
-    // المسجّلون: كل مستخدم ينشئ/يعدّل وثيقته الخاصّة عند التسجيل، والمدير يقرأ القائمة.
+    // ---- المسجّلون: كل مستخدم ينشئ وثيقته؛ مدراء المنصّة يقرؤون القائمة --------
     match /users/{uid} {
-      allow read: if isAdmin();
+      allow read: if isPlatformAdmin();
       allow create, update: if request.auth != null && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['email', 'name', 'created_at'])
-        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.email == uemail()
         && request.resource.data.name is string && request.resource.data.name.size() <= 60;
       allow delete: if isOwner();
     }
 
-    // المدراء: المالك وحده يعيّن/يزيل. ويُسمح للمستخدم بقراءة وثيقته هو فقط (لمعرفة حالته).
-    match /admins/{email} {
-      allow read: if isAdmin()
-        || (request.auth != null && request.auth.token.email == email);
+    // ---- الأعضاء المعتمَدون (يُنشئون تورنيرات) — المالك وحده يعتمد -------------
+    match /members/{addr} {
+      allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr);
+      allow write: if isOwner();
+    }
+
+    // ---- مدراء المنصّة (كل الصلاحيات) — المالك وحده يمنح ----------------------
+    match /admins/{addr} {
+      allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr);
       allow write: if isOwner();
     }
 
