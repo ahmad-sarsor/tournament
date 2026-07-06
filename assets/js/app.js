@@ -296,12 +296,21 @@ function renderStats(state) {
         cardMap.set(e.player_id, c);
       }
     }
-    // لا نُسقط لاعباً غير محمَّل: اسم بديل + فريق الحدث احتياطاً، فيظهر كل من سجّل فعلاً
-    const rowsFrom = (map) => [...map.entries()].map(([pid, v]) => {
-      const p = playersById.get(pid);
-      const team_id = p?.team_id || v.team_id;
-      return { name: p?.name || t.unknownPlayer, team_id, grp: groupOfTeam(team_id), ...v };
-    }).filter((r) => teamOk(r.team_id));
+    // نُجمّع حسب (الاسم + الفريق) لا حسب المعرّف: يدمج سجلّات اللاعب المكرّرة في صفّ واحد
+    // (لاعب أُضيف مرّتين تُوزَّع أهدافه على معرّفين فيظهر مكرّراً) — ولا نُسقط أحداً.
+    const rowsFrom = (map) => {
+      const merged = new Map();
+      for (const [pid, v] of map.entries()) {
+        const p = playersById.get(pid);
+        const team_id = p?.team_id || v.team_id;
+        const name = p?.name || t.unknownPlayer;
+        const key = name + "|" + team_id;
+        const row = merged.get(key) || { name, team_id, grp: groupOfTeam(team_id), goals: 0, y: 0, r: 0 };
+        row.goals += v.goals || 0; row.y += v.y || 0; row.r += v.r || 0;
+        merged.set(key, row);
+      }
+      return [...merged.values()].filter((row) => teamOk(row.team_id));
+    };
     const scorers = rowsFrom(goalMap).sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name, "ar"));
     const cards = rowsFrom(cardMap).sort((a, b) => (b.r - a.r) || (b.y - a.y) || a.name.localeCompare(b.name, "ar"));
 
