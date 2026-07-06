@@ -228,6 +228,15 @@ function renderTabContent(state) {
 
 // ---- تبويب الإحصائيات ------------------------------------------------------
 
+// قائمة فلتر منسدلة موحّدة (خيار «الكل» + بقيّة الخيارات)
+function filterSelect(ariaLabel, allLabel, options, onChange) {
+  return el("select.input.filter-select", {
+    "aria-label": ariaLabel,
+    onchange: (e) => onChange(e.currentTarget.value),
+  }, [el("option", { value: "all", text: allLabel }),
+      ...options.map((o) => el("option", { value: o.value, text: o.label }))]);
+}
+
 function renderStats(state) {
   const { bundle, tournament } = state;
   const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
@@ -235,19 +244,29 @@ function renderStats(state) {
   const playersById = new Map((bundle.players || []).map((x) => [x.id, x]));
   const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
 
-  let activeGroup = "all";
+  let activeGroup = "all", activeTeam = "all";
   const wrap = el("div");
   const content = el("div");
+  const groupOfTeam = (tid) => { const tm = teamById.get(tid); return tm ? (groupById.get(tm.group_id)?.name || "—") : "—"; };
 
-  const chips = el("div.filters");
-  if (bundle.groups.length > 1) {
-    const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
-      text: label,
-      onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerender(); },
-    });
-    chips.appendChild(makeChip(t.allGroups, "all"));
-    for (const g of bundle.groups) chips.appendChild(makeChip(g.name, g.id));
-    wrap.appendChild(chips);
+  // فلاتر منسدلة: البيت + الفريق + مسح الكل
+  const selects = [];
+  const filters = el("div.filter-selects");
+  const addSel = (sel) => { selects.push(sel); filters.appendChild(sel); };
+  if (bundle.groups.length > 1)
+    addSel(filterSelect(t.filterByGroup, t.allGroups, bundle.groups.map((g) => ({ value: g.id, label: g.name })),
+      (v) => { activeGroup = v; rerender(); }));
+  if (bundle.teams.length) {
+    const teamsSorted = [...bundle.teams].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.name || "").localeCompare(String(b.name || "")));
+    addSel(filterSelect(t.filterByTeam, t.allTeams, teamsSorted.map((tm) => ({ value: tm.id, label: tm.name })),
+      (v) => { activeTeam = v; rerender(); }));
+  }
+  if (filters.children.length) {
+    filters.appendChild(el("button.btn.btn-sm.btn-outline.filter-clear", {
+      type: "button", text: "✕ " + t.clearFilters,
+      onclick: () => { activeGroup = activeTeam = "all"; selects.forEach((s) => { s.value = "all"; }); rerender(); },
+    }));
+    wrap.appendChild(filters);
   }
   wrap.appendChild(content);
 
@@ -256,39 +275,41 @@ function renderStats(state) {
   }
 
   function rerender() {
-    const teamIds = activeGroup === "all" ? null : new Set(bundle.teams.filter((x) => x.group_id === activeGroup).map((x) => x.id));
-    const inFilter = (tid) => !teamIds || teamIds.has(tid);
+    const groupTeamIds = activeGroup === "all" ? null : new Set(bundle.teams.filter((x) => x.group_id === activeGroup).map((x) => x.id));
+    const inGroup = (tid) => !groupTeamIds || groupTeamIds.has(tid);
+    const teamOk = (tid) => activeTeam === "all" || tid === activeTeam;
     const teamName = (tid) => teamById.get(tid)?.name || "—";
 
-    // المباريات المُحتسَبة (منتهية وضمن المرشّح) — منها تُبنى كل الإحصائيات
-    const played = (bundle.matches || []).filter((m) => isCounted(m) && inFilter(m.home_team_id) && inFilter(m.away_team_id));
-    const countedIds = new Set(played.map((m) => m.id));
+    // نطاق البيت (كلا الفريقين). الهدّافون/البطاقات تُحتسب من كل مباريات النطاق —
+    // منتهية أو مباشرة — كي يظهر مسجّلو المباريات الجارية أيضاً (إصلاح: كانوا يُسقَطون).
+    const scopeMatches = (bundle.matches || []).filter((m) => inGroup(m.home_team_id) && inGroup(m.away_team_id));
+    const scopeIds = new Set(scopeMatches.map((m) => m.id));
+    const played = scopeMatches.filter(isCounted);   // للبلاطات وإحصاء الفرق (المنتهية فقط)
 
-    // أهداف اللاعبين والبطاقات من أحداث تلك المباريات فقط (اتّساقاً مع باقي الإحصائيات)
     const goalMap = new Map(), cardMap = new Map();
     for (const e of bundle.events || []) {
-      if (!e.player_id || !countedIds.has(e.match_id)) continue;
-      if (e.type === "goal") goalMap.set(e.player_id, (goalMap.get(e.player_id) || 0) + 1);
+      if (!e.player_id || !scopeIds.has(e.match_id)) continue;
+      if (e.type === "goal") { const c = goalMap.get(e.player_id) || { goals: 0, team_id: e.team_id }; c.goals++; goalMap.set(e.player_id, c); }
       else if (e.type === "yellow" || e.type === "red") {
-        const c = cardMap.get(e.player_id) || { y: 0, r: 0, team: e.team_id };
+        const c = cardMap.get(e.player_id) || { y: 0, r: 0, team_id: e.team_id };
         if (e.type === "yellow") c.y++; else c.r++;
         cardMap.set(e.player_id, c);
       }
     }
-    const scorers = [...goalMap.entries()]
-      .map(([pid, g]) => ({ p: playersById.get(pid), goals: g }))
-      .filter((x) => x.p)
-      .sort((a, b) => b.goals - a.goals || a.p.name.localeCompare(b.p.name, "ar"));
-    const cards = [...cardMap.entries()]
-      .map(([pid, c]) => ({ p: playersById.get(pid), ...c }))
-      .filter((x) => x.p)
-      .sort((a, b) => (b.r - a.r) || (b.y - a.y) || a.p.name.localeCompare(b.p.name, "ar"));
+    // لا نُسقط لاعباً غير محمَّل: اسم بديل + فريق الحدث احتياطاً، فيظهر كل من سجّل فعلاً
+    const rowsFrom = (map) => [...map.entries()].map(([pid, v]) => {
+      const p = playersById.get(pid);
+      const team_id = p?.team_id || v.team_id;
+      return { name: p?.name || t.unknownPlayer, team_id, grp: groupOfTeam(team_id), ...v };
+    }).filter((r) => teamOk(r.team_id));
+    const scorers = rowsFrom(goalMap).sort((a, b) => b.goals - a.goals || a.name.localeCompare(b.name, "ar"));
+    const cards = rowsFrom(cardMap).sort((a, b) => (b.r - a.r) || (b.y - a.y) || a.name.localeCompare(b.name, "ar"));
 
     const totalGoals = played.reduce((s, m) => s + (m.home_score || 0) + (m.away_score || 0), 0);
     const avg = played.length ? (totalGoals / played.length).toFixed(1) : "0";
 
-    // إحصائيات الفرق (ترتيب حسب الأهداف المُسجَّلة)
-    const teams = activeGroup === "all" ? bundle.teams : bundle.teams.filter((x) => x.group_id === activeGroup);
+    // إحصائيات الفرق (ضمن نطاق البيت والفريق المختار)
+    const teams = bundle.teams.filter((x) => inGroup(x.id) && teamOk(x.id));
     const teamRows = computeGroupStandings(teams, bundle.matches, points)
       .slice().sort((a, b) => b.gf - a.gf || b.gd - a.gd || a.team.name.localeCompare(b.team.name, "ar"));
 
@@ -297,29 +318,33 @@ function renderStats(state) {
       statTile(played.length, t.statMatchesPlayed),
       statTile(totalGoals, t.statTotalGoals),
       statTile(avg, t.statAvgGoals),
-      statTile(scorers[0] ? scorers[0].p.name : "—", t.statTopScorer),
+      statTile(scorers[0] ? scorers[0].name : "—", t.statTopScorer),
     ]);
 
-    // الهدّافون
+    const showGroupCol = bundle.groups.length > 0;
+
+    // الهدّافون (مع عمود البيت)
     const scorersEl = scorers.length
       ? el("div.table-wrap", {}, [el("table.standings", {}, [
-          el("thead", {}, [el("tr", {}, [el("th.rank-col", { text: "#" }), el("th.team-col", { text: t.th_player }), el("th", { text: t.th_team }), el("th.pts-col", { text: "⚽" })])]),
+          el("thead", {}, [el("tr", {}, [el("th.rank-col", { text: "#" }), el("th.team-col", { text: t.th_player }), el("th", { text: t.th_team }), showGroupCol ? el("th", { text: t.th_group }) : null, el("th.pts-col", { text: "⚽" })])]),
           el("tbody", {}, scorers.map((s, i) => el("tr" + (i === 0 ? ".champion" : ""), {}, [
             el("td", {}, [el("span.rank", { text: String(i + 1) })]),
-            el("td.team-col", {}, [el("span.team-name", { text: s.p.name })]),
-            el("td", {}, [el("span.stat-team", { text: teamName(s.p.team_id) })]),
+            el("td.team-col", {}, [el("span.team-name", { text: s.name })]),
+            el("td", {}, [el("span.stat-team", { text: teamName(s.team_id) })]),
+            showGroupCol ? el("td", {}, [el("span.stat-team", { text: s.grp })]) : null,
             el("td", {}, [el("span.pts", { text: String(s.goals) })]),
           ]))),
         ])])
       : el("p.page-sub", { style: "padding:8px 2px", text: t.noScorersYet });
 
-    // البطاقات
+    // البطاقات (مع عمود البيت)
     const cardsEl = cards.length
       ? el("div.table-wrap", {}, [el("table.standings", {}, [
-          el("thead", {}, [el("tr", {}, [el("th.team-col", { text: t.th_player }), el("th", { text: t.th_team }), el("th", { text: "🟨" }), el("th", { text: "🟥" })])]),
+          el("thead", {}, [el("tr", {}, [el("th.team-col", { text: t.th_player }), el("th", { text: t.th_team }), showGroupCol ? el("th", { text: t.th_group }) : null, el("th", { text: "🟨" }), el("th", { text: "🟥" })])]),
           el("tbody", {}, cards.map((c) => el("tr", {}, [
-            el("td.team-col", {}, [el("span.team-name", { text: c.p.name })]),
-            el("td", {}, [el("span.stat-team", { text: teamName(c.p.team_id) })]),
+            el("td.team-col", {}, [el("span.team-name", { text: c.name })]),
+            el("td", {}, [el("span.stat-team", { text: teamName(c.team_id) })]),
+            showGroupCol ? el("td", {}, [el("span.stat-team", { text: c.grp })]) : null,
             el("td", { text: String(c.y) }),
             el("td", { text: String(c.r) }),
           ]))),
@@ -473,42 +498,31 @@ function renderSchedule(state) {
     }
   };
 
-  const filters = el("div.sched-filters");
-
-  // مرشّح البيوت (أزرار) — عند وجود أكثر من بيت
-  if (bundle.groups.length > 1) {
-    const chips = el("div.filters");
-    const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
-      text: label,
-      onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerenderList(true); },
-    });
-    chips.appendChild(makeChip(t.allGroups, "all"));
-    for (const g of bundle.groups) chips.appendChild(makeChip(g.name, g.id));
-    filters.appendChild(chips);
-  }
-
-  // مرشّحا الفريق والتاريخ (قوائم منسدلة)
-  const selects = el("div.filter-selects");
+  // فلاتر منسدلة موحّدة: بيت + فريق + تاريخ + زر مسح
+  const selects = [];
+  const filters = el("div.filter-selects");
+  const addSel = (sel) => { selects.push(sel); filters.appendChild(sel); };
+  if (bundle.groups.length > 1)
+    addSel(filterSelect(t.filterByGroup, t.allGroups, bundle.groups.map((g) => ({ value: g.id, label: g.name })),
+      (v) => { activeGroup = v; rerenderList(true); }));
   if (bundle.teams.length) {
     const teams = [...bundle.teams].sort((a, b) =>
       (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.name || "").localeCompare(String(b.name || "")));
-    selects.appendChild(el("select.input.filter-select", {
-      "aria-label": t.filterByTeam,
-      onchange: (e) => { activeTeam = e.currentTarget.value; rerenderList(true); },
-    }, [el("option", { value: "all", text: t.allTeams }),
-        ...teams.map((tm) => el("option", { value: tm.id, text: tm.name }))]));
+    addSel(filterSelect(t.filterByTeam, t.allTeams, teams.map((tm) => ({ value: tm.id, label: tm.name })),
+      (v) => { activeTeam = v; rerenderList(true); }));
   }
   const dates = [...new Set(bundle.matches.map((m) => m.match_date).filter(Boolean))].sort();
-  if (dates.length > 1) {
-    selects.appendChild(el("select.input.filter-select", {
-      "aria-label": t.filterByDate,
-      onchange: (e) => { activeDate = e.currentTarget.value; rerenderList(true); },
-    }, [el("option", { value: "all", text: t.allDays }),
-        ...dates.map((d) => el("option", { value: d, text: weekdayName(d) + " · " + formatDate(d) }))]));
-  }
-  if (selects.children.length) filters.appendChild(selects);
+  if (dates.length > 1)
+    addSel(filterSelect(t.filterByDate, t.allDays, dates.map((d) => ({ value: d, label: weekdayName(d) + " · " + formatDate(d) })),
+      (v) => { activeDate = v; rerenderList(true); }));
 
-  if (filters.children.length) wrap.appendChild(filters);
+  if (filters.children.length) {
+    filters.appendChild(el("button.btn.btn-sm.btn-outline.filter-clear", {
+      type: "button", text: "✕ " + t.clearFilters,
+      onclick: () => { activeGroup = activeTeam = activeDate = "all"; selects.forEach((s) => { s.value = "all"; }); rerenderList(true); },
+    }));
+    wrap.appendChild(filters);
+  }
   wrap.appendChild(listHost);
 
   // تمرير تلقائي عند فتح التبويب فقط (لا مع التحديث اللحظي الذي يعيد الرسم)

@@ -295,11 +295,10 @@ table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 
 
 /* الأدوات ------------------------------------------------------------------ */
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-/* شريط فلاتر البرنامج: بيوت (أزرار) + فريق/تاريخ (قوائم) */
-.sched-filters { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
-.sched-filters .filters { margin-bottom: 0; }
-.filter-selects { display: flex; flex-wrap: wrap; gap: 8px; }
+/* شريط الفلاتر الموحّد: قوائم منسدلة (بيت/فريق/تاريخ) + زر مسح */
+.filter-selects { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px; }
 select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 8px 12px; font-size: .9rem; cursor: pointer; }
+.filter-clear { white-space: nowrap; }
 .chip { padding: 7px 15px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-weight: 600; font-size: .84rem; cursor: pointer; transition: .15s; }
 .chip:hover { border-color: var(--border-2); color: var(--ink); }
 .chip.active { background: var(--brand); color: #fff; border-color: var(--brand); }
