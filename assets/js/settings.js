@@ -38,7 +38,7 @@ if (typeof window !== "undefined") {
   window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; });
 }
 
-export function openSettings({ isAdmin = false } = {}) {
+export function openSettings({ isAdmin = false, session = null, onSignOut = null } = {}) {
   const seg = (options, current, onPick) => {
     const wrap = el("div.seg");
     options.forEach((o) => {
@@ -85,7 +85,16 @@ export function openSettings({ isAdmin = false } = {}) {
 
   const footer = [];
   if (!isAdmin) footer.push(el("button.btn.btn-outline.btn-block", { type: "button", text: "💡 " + t.suggestBox, onclick: openSuggestionModal }));
-  if (!isAdmin) footer.push(el("a.btn.btn-outline.btn-block", { href: "./admin.html", text: "🔒 " + t.organizerPanel }));
+  if (!isAdmin && !session) footer.push(el("a.btn.btn-outline.btn-block", { href: "./admin.html", text: "🔒 " + t.organizerPanel }));
+  // مسجَّل الدخول: عرض بريده + زر تسجيل الخروج
+  if (session && onSignOut) {
+    const email = session.user?.email || "";
+    footer.push(el("div.set-hint", { style: "text-align:center;margin-top:6px", text: email }));
+    footer.push(el("button.btn.btn-outline.btn-block", {
+      type: "button", text: "🚪 " + t.logout,
+      onclick: async () => { try { await onSignOut(); } catch {} },
+    }));
+  }
 
   openModal({
     title: "⚙️ " + t.settings,

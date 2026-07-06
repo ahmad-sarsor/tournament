@@ -7,6 +7,7 @@ import { t, statusLabel, matchStatusLabel, formatDate, formatTime, weekdayName }
 import { el, mount, clear, spinner, emptyState, toast } from "./util.js";
 import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
+  getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail,
 } from "./data.js";
 import { renderScheduleDays, standingsTable, eventsTimeline } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
@@ -16,7 +17,23 @@ const brandName = document.getElementById("brand-name");
 if (SITE_NAME) { brandName.textContent = SITE_NAME; document.title = SITE_NAME; }
 
 applyPrefs();
-document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({ isAdmin: false }));
+
+// حالة الدخول (نفس جلسة لوحة الإدارة) — تُظهر زر الخروج وزر إدارة المباراة للمخوَّلين
+let session = null;
+const authLink = document.querySelector(".header-auth");
+function renderAuthLink() {
+  if (!authLink) return;
+  if (session) { authLink.textContent = "لوحتي"; authLink.setAttribute("href", "./admin.html"); }
+  else { authLink.textContent = "دخول / تسجيل"; authLink.setAttribute("href", "./admin.html#/register"); }
+}
+getSession().then((s) => { session = s; renderAuthLink(); }).catch(() => {});
+onAuthChange((s) => { session = s; renderAuthLink(); });
+
+document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({
+  isAdmin: false,
+  session,
+  onSignOut: async () => { try { await signOut(); } catch {} location.reload(); },
+}));
 
 let currentUnsub = null;              // إلغاء اشتراك التحديث اللحظي الحالي
 function cleanup() { if (currentUnsub) { currentUnsub(); currentUnsub = null; } }
@@ -509,6 +526,19 @@ function renderStandings(state) {
 
 // ---- صفحة المباراة (مستقلّة، مثل 365) --------------------------------------
 
+// هل يستطيع الزائر الحالي إدارة/تسجيل هذا التورنير؟ (لإظهار زر «إدارة المباراة»)
+async function canManageTournament(tournament) {
+  const s = await getSession();
+  const u = s?.user;
+  if (!u || !u.email || !u.emailVerified) return false;   // الكتابة تتطلّب بريداً موثَّقاً
+  const email = u.email.toLowerCase();
+  if (isOwnerEmail(email)) return true;
+  const inList = (arr) => Array.isArray(arr) && arr.some((x) => String(x).toLowerCase() === email);
+  if (String(tournament.owner_email || "").toLowerCase() === email) return true;
+  if (inList(tournament.admin_emails) || inList(tournament.scorer_emails)) return true;
+  return await amIPlatformAdmin();
+}
+
 async function renderMatchDetail(id, matchId) {
   mount(app, spinner());
   const tournament = await fetchTournament(id);
@@ -521,7 +551,15 @@ async function renderMatchDetail(id, matchId) {
   if (!match) return mount(app, backLink, emptyState("🔍", "المباراة غير موجودة"));
 
   const host = el("div");
-  mount(app, el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [backLink, shareBtn(t.matchDetails)]), host);
+  // زر «إدارة المباراة» يظهر فقط لمن يملك صلاحية على هذا التورنير (لا للزائر العادي)
+  const canManage = await canManageTournament(tournament);
+  mount(app, el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
+    backLink,
+    el("div", { style: "display:flex;align-items:center;gap:8px" }, [
+      canManage ? el("a.btn.btn-sm.btn-primary", { href: `./admin.html#/t/${id}/m/${matchId}`, text: "▶ " + t.manageMatchBtn }) : null,
+      shareBtn(t.matchDetails),
+    ]),
+  ]), host);
   document.title = t.matchDetails + " · " + (SITE_NAME || "");
 
   const render = () => {
