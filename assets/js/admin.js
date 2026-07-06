@@ -1274,6 +1274,38 @@ async function renderLiveConsole(tid, matchId) {
     catch (e) { toast(e.message || t.errorGeneric, "err"); }
   }
 
+  // مجموعات الأحداث المتطابقة (نفس الفريق واللاعب والنوع والدقيقة) بأكثر من نسخة
+  function duplicateEventGroups() {
+    const evts = (bundle.events || []).filter((e) => e.match_id === matchId);
+    const groups = new Map();
+    for (const e of evts) {
+      const key = [e.team_id, e.player_id || "-", e.type, e.minute ?? "-"].join("|");
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    }
+    return [...groups.values()].filter((arr) => arr.length > 1);
+  }
+
+  async function cleanDuplicateEvents() {
+    const dupGroups = duplicateEventGroups();
+    if (!dupGroups.length) return toast(t.noDuplicates, "ok");
+    const playersById = new Map((bundle.players || []).map((p) => [p.id, p]));
+    const toDelete = [];
+    const lines = [];
+    for (const arr of dupGroups) {
+      arr.sort((a, b) => (a.created_at ?? 0) - (b.created_at ?? 0)); // نُبقي الأقدم
+      toDelete.push(...arr.slice(1));
+      const p = arr[0].player_id ? playersById.get(arr[0].player_id) : null;
+      lines.push(`${eventIcon(arr[0].type)} ${p ? p.name : t.unknownPlayer}: ${arr.length} ← 1`);
+    }
+    if (!(await confirmDialog(t.cleanDupConfirm + "\n\n" + lines.join("\n") + "\n\n" + t.cleanDupNote))) return;
+    try {
+      for (const e of toDelete) await api.deleteEvent(e.id); // حذف خام دون تغيير النتيجة
+      toast(t.cleanedN.replace("{n}", String(toDelete.length)), "ok");
+      await reload();
+    } catch (err) { toast(err.message || t.errorGeneric, "err"); }
+  }
+
   function stepper(isHome, name, score) {
     return el("div.lc-stepper", {}, [
       el("div.lc-stepper-name", { text: name }),
@@ -1355,7 +1387,13 @@ async function renderLiveConsole(tid, matchId) {
       minuteRow,
       el("div.lc-actions", {}, [sidePanel(match.home_team_id, "home"), sidePanel(match.away_team_id, "away")]),
       statusControls(),
-      el("h3.lc-events-title", { text: t.events }),
+      (() => {
+        const extra = duplicateEventGroups().reduce((n, arr) => n + (arr.length - 1), 0);
+        return el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap" }, [
+          el("h3.lc-events-title", { style: "margin:0", text: t.events }),
+          extra ? el("button.btn.btn-sm.btn-danger", { type: "button", text: "🧹 " + t.cleanDuplicates + " (" + extra + ")", onclick: cleanDuplicateEvents }) : null,
+        ]);
+      })(),
       timeline,
     );
   }

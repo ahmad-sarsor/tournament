@@ -569,6 +569,11 @@ export async function removeEvent(event, match, teamGoalEvents = 0) {
   await deleteDoc(doc(requireDb(), "events", event.id));
 }
 
+// حذف حدث خام دون أي تعديل على النتيجة (لتنظيف الأحداث المكرّرة التي لم تُغيّر النتيجة)
+export async function deleteEvent(id) {
+  await deleteDoc(doc(requireDb(), "events", id));
+}
+
 export async function insertMatches(rows) {
   if (!rows.length) return [];
   const d = requireDb();
