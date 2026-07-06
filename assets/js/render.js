@@ -11,8 +11,9 @@ export function knockoutRoundName(r, totalRounds) {
   return { 0: "النهائي", 1: "نصف النهائي", 2: "ربع النهائي", 3: "دور الـ16", 4: "دور الـ32" }[fromEnd] || ("الجولة " + r);
 }
 
-// بطاقة مباراة في الشجرة
-function bracketMatch(m, teamById, tid) {
+// بطاقة مباراة في الشجرة (onEdit اختياري: يُظهر زر تعديل للإدارة)
+function bracketMatch(m, teamById, opts = {}) {
+  const { tid, onEdit } = opts;
   const home = teamById.get(m.home_team_id), away = teamById.get(m.away_team_id);
   const finished = m.status === "finished" && m.home_score != null && m.away_score != null;
   const winner = knockoutWinner(m);
@@ -24,7 +25,12 @@ function bracketMatch(m, teamById, tid) {
     side(home, m.home_team_id, m.home_score),
     side(away, m.away_team_id, m.away_score),
   ]);
-  return (m.home_team_id && m.away_team_id && tid) ? el("a.bk-link", { href: `#/t/${tid}/m/${m.id}` }, [card]) : card;
+  const body = (m.home_team_id && m.away_team_id && tid) ? el("a.bk-link", { href: `#/t/${tid}/m/${m.id}` }, [card]) : card;
+  if (!onEdit) return body;
+  return el("div.bk-wrap", {}, [
+    body,
+    el("button.bk-edit-btn", { type: "button", text: "✎ " + t.edit, onclick: () => onEdit(m) }),
+  ]);
 }
 
 // شجرة خروج المغلوب (أعمدة لكل جولة) — تُستخدم في الواجهة والإدارة
@@ -37,7 +43,7 @@ export function renderBracket(matches, teamById, opts = {}) {
   const wrap = el("div.bracket");
   for (let r = 1; r <= rounds; r++) {
     const col = el("div.bracket-col", {}, [el("div.bracket-round-title", { text: knockoutRoundName(r, rounds) })]);
-    for (const m of ko.filter((x) => x.round === r)) col.appendChild(bracketMatch(m, teamById, opts.tid));
+    for (const m of ko.filter((x) => x.round === r)) col.appendChild(bracketMatch(m, teamById, opts));
     wrap.appendChild(col);
   }
   scroller.appendChild(wrap);

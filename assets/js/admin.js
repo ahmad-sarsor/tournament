@@ -5,7 +5,7 @@ import { isConfigured } from "./firebase.js";
 import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog } from "./util.js";
 import * as api from "./data.js";
-import { groupByDay, eventIcon, renderBracket } from "./render.js";
+import { groupByDay, eventIcon, renderBracket, knockoutRoundName } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
@@ -634,21 +634,62 @@ async function renderKnockoutAdmin(host, state) {
   const bar = el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
     el("button.btn.btn-primary", { type: "button", text: "⚡ " + t.generateKnockout, onclick: () => genKnockout(tournament, bundle) }),
     hasKo ? el("button.btn.btn-outline", { type: "button", text: "↑ " + t.advanceWinners, onclick: () => advanceKo(bundle) }) : null,
+    hasKo ? el("button.btn.btn-danger", { type: "button", text: "🗑 " + t.deleteKnockout, onclick: () => delKnockout(bundle) }) : null,
   ]);
+  // تعديل أي مباراة من الشجرة (مباراة عادية → يُنسَّق تلقائياً مع البرنامج)
+  const onEdit = (m) => matchForm(state, m);
   mount(host, bar,
-    renderBracket(state.matches, teamById, { tid: tournament.id }),
+    renderBracket(state.matches, teamById, { tid: tournament.id, onEdit }),
     el("p.set-hint", { style: "margin-top:14px", text: t.knockoutHint }));
 }
 
+// توليد الشجرة: يعرض نموذجاً لموعد كل مباراة ثم يُنشئ
 async function genKnockout(tournament, bundle) {
-  if (!(await confirmDialog(t.regenKnockoutWarn))) return;
-  try {
-    const res = await api.generateKnockout(tournament, bundle);
-    // ترقية البايات فوراً بعد التوليد
-    try { const fresh = await api.fetchTournamentBundle(tournament.id); await api.syncKnockoutAdvancement(fresh); } catch {}
-    toast(t.knockoutGenerated.replace("{n}", String(res.qualifiers)), "ok");
-    route();
-  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+  let planRes;
+  try { planRes = api.planKnockout(tournament, bundle); }
+  catch (e) { return toast(e.message || t.errorGeneric, "err"); }
+  const { plan, rounds } = planRes;
+
+  const rows = plan.map((p) => {
+    const names = (p.home || p.away)
+      ? `${p.home ? p.home.name : "…"} × ${p.away ? p.away.name : "…"}`
+      : `#${p.pos + 1}`;
+    return {
+      p, label: `${knockoutRoundName(p.round, rounds)} — ${names}`,
+      dateI: el("input.input", { type: "date" }),
+      timeI: el("input.input", { type: "time" }),
+    };
+  });
+  const body = el("div", {}, [
+    el("p.set-hint", { style: "margin-bottom:12px", text: t.regenKnockoutWarn }),
+    ...rows.map((r) => el("div.field", {}, [
+      el("label", { text: r.label }),
+      el("div", { style: "display:flex;gap:8px" }, [r.dateI, r.timeI]),
+    ])),
+  ]);
+  let busy = false;
+  const close = openModal({
+    title: "⚡ " + t.generateKnockout,
+    body,
+    footer: [
+      el("button.btn.btn-primary", { type: "button", text: t.generateKnockout, onclick: async () => {
+        if (busy) return; busy = true;
+        const schedule = rows.map((r) => ({ date: r.dateI.value || undefined, time: r.timeI.value || undefined }));
+        try {
+          await api.createKnockout(tournament, bundle, plan, schedule);
+          try { const fresh = await api.fetchTournamentBundle(tournament.id); await api.syncKnockoutAdvancement(fresh); } catch {}
+          close(); toast(t.knockoutGenerated.replace("{n}", String(planRes.qualifiers)), "ok"); route();
+        } catch (e) { busy = false; toast(e.message || t.errorGeneric, "err"); }
+      } }),
+      el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close() }),
+    ],
+  });
+}
+
+async function delKnockout(bundle) {
+  if (!(await confirmDialog(t.deleteKnockoutWarn))) return;
+  try { await api.deleteKnockout(bundle); toast(t.deleted, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
 async function advanceKo(bundle) {

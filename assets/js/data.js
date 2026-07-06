@@ -615,38 +615,48 @@ export function computeQualifiers(tournament, groups, teams, matches) {
   return ranked.map((r) => r.team);
 }
 
-// يولّد شجرة خروج المغلوب كاملةً (يحذف أي شجرة سابقة). البايات تتأهّل تلقائياً.
-export async function generateKnockout(tournament, bundle) {
-  const d = requireDb();
-  const tid = tournament.id;
-  for (const m of (bundle.matches || []).filter((m) => m.stage === "knockout")) {
-    await deleteWhere("events", "match_id", m.id);
-    await deleteDoc(doc(d, "matches", m.id));
-  }
+// يحسب بنية الشجرة (بلا إنشاء): قائمة مباريات مرتّبة، كلٌّ {round, pos, home, away}
+// (home/away كائن فريق أو null للباي/غير المحدَّد) — لعرضها في نموذج المواعيد
+export function planKnockout(tournament, bundle) {
   const qualifiers = computeQualifiers(tournament, bundle.groups, bundle.teams, bundle.matches);
   if (qualifiers.length < 2) throw new Error("لا يوجد متأهّلون كافون (فريقان على الأقل)");
-  let B = 2; while (B < qualifiers.length) B *= 2;                 // أقرب قوّة 2
-  const order = bracketSeedOrder(B);
-  let advancing = order.map((seed) => qualifiers[seed - 1] || null); // مقاعد الجولة 1 (null = باي)
+  let B = 2; while (B < qualifiers.length) B *= 2;
+  let advancing = bracketSeedOrder(B).map((seed) => qualifiers[seed - 1] || null);
   const rounds = Math.round(Math.log2(B));
-  const rows = [];
-  let sort = 0;
+  const plan = [];
   for (let r = 1; r <= rounds; r++) {
     const next = [];
     for (let pos = 0; pos < advancing.length / 2; pos++) {
       const home = advancing[pos * 2], away = advancing[pos * 2 + 1];
-      rows.push({
-        tournament_id: tid, group_id: null, stage: "knockout", round: r, bracket_pos: pos,
-        home_team_id: home ? home.id : null, away_team_id: away ? away.id : null,
-        status: "scheduled", home_score: null, away_score: null, sort_order: sort++,
-      });
-      // باي: إن حضر أحدهما فقط تأهّل تلقائياً للجولة التالية
-      next.push(home && !away ? home : (away && !home ? away : null));
+      plan.push({ round: r, pos, home, away });
+      next.push(home && !away ? home : (away && !home ? away : null)); // باي يتأهّل
     }
     advancing = next;
   }
+  return { plan, rounds, bracketSize: B, qualifiers: qualifiers.length };
+}
+
+// يحذف كل مباريات خروج المغلوب (وأحداثها) لهذا التورنير
+export async function deleteKnockout(bundle) {
+  const d = requireDb();
+  for (const m of (bundle.matches || []).filter((m) => m.stage === "knockout")) {
+    await deleteWhere("events", "match_id", m.id);
+    await deleteDoc(doc(d, "matches", m.id));
+  }
+}
+
+// ينشئ الشجرة من الخطّة + المواعيد (schedule: مصفوفة بنفس ترتيب plan، كلٌّ {date?, time?})
+export async function createKnockout(tournament, bundle, plan, schedule = []) {
+  await deleteKnockout(bundle);
+  const rows = plan.map((p, i) => ({
+    tournament_id: tournament.id, group_id: null, stage: "knockout", round: p.round, bracket_pos: p.pos,
+    home_team_id: p.home ? p.home.id : null, away_team_id: p.away ? p.away.id : null,
+    match_date: (schedule[i] && schedule[i].date) || undefined,   // clean يُسقط undefined
+    match_time: (schedule[i] && schedule[i].time) || undefined,
+    status: "scheduled", home_score: null, away_score: null, sort_order: i,
+  }));
   await insertMatches(rows);
-  return { bracketSize: B, rounds, qualifiers: qualifiers.length };
+  return { count: rows.length };
 }
 
 // فائز مباراة خروج مغلوب (باي، أو الأعلى نتيجةً بعد الانتهاء؛ التعادل لا يتأهّل)

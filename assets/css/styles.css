@@ -646,3 +646,6 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .bk-win { background: var(--brand-soft); }
 .bk-win .bk-team { color: var(--ink); font-weight: 800; }
 .bk-win .bk-score { color: var(--brand); }
+.bk-wrap { display: flex; flex-direction: column; gap: 4px; }
+.bk-edit-btn { padding: 4px 8px; font-size: .74rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); cursor: pointer; transition: .15s; }
+.bk-edit-btn:hover { color: var(--brand); border-color: var(--brand); }
