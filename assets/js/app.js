@@ -8,7 +8,7 @@ import { el, mount, clear, spinner, emptyState, toast, openModal } from "./util.
 import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
   getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail,
-  fetchCompetitionsByTournament, fetchPredictors, fetchPredictions, fetchMyPredictor, fetchMyPredictions,
+  fetchCompetitionsByTournament, subscribeCompetition, getCompCache,
   fetchMyContact, registerPredictor, updateMyPredictor, savePrediction,
   computePredictionStandings, compScoring, isPredictable, predictionPoints, currentUid,
 } from "./data.js";
@@ -42,9 +42,15 @@ document.getElementById("settings-btn")?.addEventListener("click", () => openSet
 
 let currentUnsub = null;              // إلغاء اشتراك التحديث اللحظي الحالي
 let predLockTimer = null;             // مؤقّت قفل التوقّعات عند أقرب موعد مباراة
+let compUnsub = null, compUnsubId = null, compOnChange = null;   // اشتراك حيّ لترتيب المسابقة
+function cleanupComp() {
+  if (compUnsub) { try { compUnsub(); } catch {} }
+  compUnsub = null; compUnsubId = null; compOnChange = null;
+}
 function cleanup() {
   if (currentUnsub) { currentUnsub(); currentUnsub = null; }
   if (predLockTimer) { clearTimeout(predLockTimer); predLockTimer = null; }
+  cleanupComp();
 }
 
 // تمرير تلقائي لبرنامج المباريات عند فتح التبويب فقط (لا مع التحديث اللحظي)
@@ -185,7 +191,10 @@ function renderTournamentShell(state) {
     hasKnockout ? tabBtn(t.knockout, tournament.id, "knockout", state.tab) : null,
     tabBtn(t.teamsTab, tournament.id, "teams", state.tab),
     tabBtn(t.statsTab, tournament.id, "stats", state.tab),
-    hasPredictions ? tabBtn("🎯 " + t.predictions, tournament.id, "predictions", state.tab) : null,
+    hasPredictions ? el("button.tab.pc-tab" + (state.tab === "predictions" ? ".active" : ""), {
+      role: "tab", text: "🎯 " + t.predictions,
+      onclick: () => { location.hash = `#/t/${tournament.id}/predictions`; },
+    }) : null,
   ]);
   const content = el("div", { id: "tab-content" });
   mount(app,
@@ -204,11 +213,27 @@ function renderTournamentShell(state) {
       ]),
       tournament.description ? el("p.page-sub", { text: tournament.description }) : null,
     ]),
+    // لافتة بارزة للمسابقة (تظهر خارج تبويب التوقّعات كي لا تبدو «مختبئة»)
+    hasPredictions && state.tab !== "predictions" ? predictionCta(state) : null,
     tabs,
     content,
   );
   document.title = tournament.name + " · " + (SITE_NAME || "");
   renderTabContent(state);
+}
+
+// لافتة دعوة بارزة بلون المسابقة المميّز
+function predictionCta(state) {
+  const comp = (state.comps || []).find((c) => c.status && c.status !== "draft");
+  if (!comp) return null;
+  return el("a.pc-cta", { href: `#/t/${state.tournament.id}/predictions` }, [
+    el("span.pc-cta-icon", { text: "🎯" }),
+    el("div.pc-cta-body", {}, [
+      el("div.pc-cta-title", { text: comp.title || t.predictionComp }),
+      el("div.pc-cta-sub", { text: t.predictionsCtaSub }),
+    ]),
+    el("span.pc-cta-go", { text: t.predictionsCtaBtn }),
+  ]);
 }
 
 // زرّ المشاركة (Web Share API مع احتياط نسخ الرابط)
@@ -422,46 +447,48 @@ function compStatusBadge(status) {
 function renderPredictions(state) {
   const root = el("div");
   const comps = (state.comps || []).filter((c) => c.status && c.status !== "draft");
-  if (!comps.length) { root.appendChild(emptyState("🎯", t.noCompetitionPublic)); return root; }
-  state.predCache ||= new Map();
+  if (!comps.length) { cleanupComp(); root.appendChild(emptyState("🎯", t.noCompetitionPublic)); return root; }
   if (!comps.some((c) => c.id === state.activeCompId)) state.activeCompId = comps[0].id;
 
-  // show(refetch): يبني التبويب. يعيد الجلب فقط عند الطلب (تحديث/انضمام جديد لمسابقة غير محمّلة)
-  const show = async (refetch) => {
+  // draw(): يرسم المسابقة النشطة من الكاش الحيّ (onSnapshot) — الترتيب يتحدّث مباشرةً
+  const draw = () => {
     const comp = comps.find((c) => c.id === state.activeCompId) || comps[0];
-    if (refetch) state.predCache.delete(comp.id);
-    if (!state.predCache.has(comp.id)) {
-      mount(root, spinner());
-      try {
-        const uid = currentUid();
-        const [predictors, predictions, myPredictor] = await Promise.all([
-          fetchPredictors(comp.id), fetchPredictions(comp.id),
-          uid ? fetchMyPredictor(comp.id, uid) : Promise.resolve(null),
-        ]);
-        const myPredictions = (myPredictor && uid) ? await fetchMyPredictions(comp.id, uid) : [];
-        state.predCache.set(comp.id, { predictors, predictions, myPredictor, myPredictions });
-      } catch (e) { console.error(e); return mount(root, el("div.alert.alert-error", { text: t.errorGeneric })); }
+    if (compUnsubId !== comp.id) {                 // اشتراك حيّ جديد فقط عند تغيّر المسابقة
+      cleanupComp();
+      compUnsub = subscribeCompetition(comp.id, () => { if (compOnChange) compOnChange(); });
+      compUnsubId = comp.id;
     }
-    renderCompView(root, state, comp, comps, state.predCache.get(comp.id), show);
+    compOnChange = draw;                            // أحدث إغلاق (أحدث root) هو المُستدعى
+    const live = getCompCache(comp.id);
+    if (!live) return mount(root, spinner());       // بانتظار أوّل لقطة
+    renderCompView(root, state, comp, comps, live, draw);
   };
-  show(false);
+  compOnChange = draw;
+  draw();
   return root;
 }
 
-function renderCompView(root, state, comp, comps, cache, show) {
+function renderCompView(root, state, comp, comps, live, rerender) {
   const teamById = new Map(state.bundle.teams.map((x) => [x.id, x]));
   const uid = currentUid();
-  const registered = !!cache.myPredictor;
+  const myPredictor = uid ? live.predictors.find((p) => p.uid === uid) : null;
+  const myPredictions = uid ? live.predictions.filter((p) => p.uid === uid) : [];
+  const registered = !!myPredictor;
   const acceptsEntries = comp.status === "open" || comp.status === "closed";
-  const standings = computePredictionStandings(cache.predictors, cache.predictions, state.bundle.matches, comp);
+  const standings = computePredictionStandings(live.predictors, live.predictions, state.bundle.matches, comp);
+  if (!state.predSubTab) state.predSubTab = "board";
+  if (state.predSubTab === "mine" && !registered) state.predSubTab = "board";
+
+  // غلاف مميّز بلون المسابقة (بنفسجي) كي لا تبدو «مختبئة»
+  const wrap = el("div.pc-wrap");
   const blocks = [];
 
   // اختيار المسابقة عند تعدّدها
   if (comps.length > 1) {
-    blocks.push(el("div.filter-selects", {}, [
+    blocks.push(el("div.filter-selects", { style: "margin-bottom:14px" }, [
       el("select.input.filter-select", {
         "aria-label": t.predictionComp,
-        onchange: (e) => { state.activeCompId = e.currentTarget.value; show(false); },
+        onchange: (e) => { state.activeCompId = e.currentTarget.value; state.predSubTab = "board"; rerender(); },
       }, comps.map((c) => {
         const o = el("option", { value: c.id, text: c.title || t.predictionComp });
         if (c.id === comp.id) o.selected = true;
@@ -470,64 +497,62 @@ function renderCompView(root, state, comp, comps, cache, show) {
     ]));
   }
 
-  blocks.push(el("div.pc-head", {}, [
-    el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, [
-      el("h2.pc-title", { text: comp.title || t.predictionComp }),
+  // رأس المسابقة (شارة + عنوان + وصف) بلون مميّز
+  blocks.push(el("div.pc-hero", {}, [
+    el("div.pc-hero-top", {}, [
+      el("span.pc-hero-icon", { text: "🎯" }),
+      el("div", { style: "flex:1;min-width:0" }, [
+        el("div.pc-hero-title", { text: comp.title || t.predictionComp }),
+        el("div.pc-hero-sub", { text: t.predictionComp }),
+      ]),
       compStatusBadge(comp.status),
     ]),
-    comp.description ? el("p.page-sub", { style: "margin-top:6px", text: comp.description }) : null,
+    comp.description ? el("p.pc-hero-desc", { text: comp.description }) : null,
+    // شريط حالتي المضغوط
+    registered
+      ? el("div.pc-mine-bar", {}, [
+          el("span.pc-badge-in", { text: "✓ " + t.youAreIn }),
+          el("span.pc-mine-name", { text: myPredictor.name || "" }),
+          el("button.btn.btn-xs.pc-btn-ghost", { style: "margin-inline-start:auto", text: "✎ " + t.editMyInfo, onclick: () => openRegisterModal(comp, state, true) }),
+        ])
+      : (comp.status === "open"
+          ? el("div.pc-join-row", {}, [
+              el("span.pc-join-txt", { text: t.registerIntro }),
+              el("button.btn.pc-btn", { text: "🎯 " + t.joinCompetition, onclick: () => openRegisterModal(comp, state, false) }),
+            ])
+          : el("div.pc-note-warn", { text: t.registrationClosed })),
   ]));
 
-  // بطاقة حالتي / الانضمام
-  if (registered) {
-    blocks.push(el("div.card.card-pad.pc-mine", {}, [
-      el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap" }, [
-        el("div", {}, [
-          el("span.pc-badge-in", { text: "✓ " + t.youAreIn }),
-          el("div", { style: "font-weight:800;margin-top:3px", text: cache.myPredictor.name || "" }),
-        ]),
-        el("button.btn.btn-sm.btn-outline", { text: "✎ " + t.editMyInfo, onclick: () => openRegisterModal(comp, cache, show, true) }),
-      ]),
-    ]));
-  } else if (comp.status === "open") {
-    blocks.push(el("div.card.card-pad", { style: "text-align:center" }, [
-      el("p", { style: "margin:0 0 12px;color:var(--text-2)", text: t.registerIntro }),
-      el("button.btn.btn-primary", { text: "🎯 " + t.joinCompetition, onclick: () => openRegisterModal(comp, cache, show, false) }),
-    ]));
-  } else {
-    blocks.push(el("div.alert.alert-warn", { text: t.registrationClosed }));
-  }
+  // تبويبان فرعيّان: الترتيب (افتراضي) | توقّعاتي — كي لا يُدفن الترتيب أسفل الإدخال
+  const subTab = (label, key) => el("button.pc-subtab" + (state.predSubTab === key ? ".active" : ""), {
+    type: "button", text: label, onclick: () => { state.predSubTab = key; rerender(); },
+  });
+  blocks.push(el("div.pc-subtabs", { role: "tablist" }, [
+    subTab("🏅 " + t.predLeaderboard, "board"),
+    registered ? subTab("🎲 " + t.myPredictions, "mine") : null,
+  ]));
 
-  // توقّعاتي
-  if (registered) {
-    const myMap = new Map((cache.myPredictions || []).map((p) => [p.match_id, p]));
+  const content = el("div.pc-content");
+  if (state.predSubTab === "mine" && registered) {
+    content.appendChild(el("div.pc-hint", { text: "🔒 " + t.predLockHint }));
+    const myMap = new Map(myPredictions.map((p) => [p.match_id, p]));
     const matches = state.bundle.matches.filter((m) => m.home_team_id && m.away_team_id);
     const section = el("div.pc-matches");
     if (!matches.length) section.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noMatchesToPredict }));
-    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), cache, show, acceptsEntries));
-    blocks.push(el("div.pc-section", {}, [
-      el("h3.mp-title", { text: "🎲 " + t.myPredictions }),
-      el("p.set-hint", { style: "margin:0 0 10px", text: t.predLockHint }),
-      section,
-    ]));
+    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), acceptsEntries));
+    content.appendChild(section);
+  } else {
+    content.appendChild(el("div.pc-live-line", {}, [el("span.pc-live-dot"), el("span", { text: t.liveBoardNote })]));
+    content.appendChild(predictionBoard(standings, comp, { myUid: uid }));
+    const cards2 = [scoringCard(comp), prizesCard(comp)].filter(Boolean);
+    if (cards2.length) content.appendChild(el("div.pc-cards2", { style: "margin-top:16px" }, cards2));
   }
+  blocks.push(content);
 
-  // طريقة الاحتساب + الجوائز
-  const cards2 = [scoringCard(comp), prizesCard(comp)].filter(Boolean);
-  if (cards2.length) blocks.push(el("div.pc-cards2", {}, cards2));
+  mount(wrap, ...blocks);
+  mount(root, wrap);
 
-  // جدول الترتيب
-  blocks.push(el("div.pc-section", {}, [
-    el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px" }, [
-      el("h3.mp-title", { style: "margin:0", text: "🏅 " + t.predLeaderboard }),
-      el("button.btn.btn-sm.btn-outline", { text: "↻ " + t.refreshBoard, onclick: () => show(true) }),
-    ]),
-    predictionBoard(standings, comp, { myUid: uid }),
-  ]));
-
-  mount(root, ...blocks);
-
-  // إعادة رسم تلقائية عند أقرب موعد قفل، كي تُقفل الصفوف حتى بلا تحديث حيّ
+  // إعادة رسم تلقائية عند أقرب موعد قفل، كي تُقفل صفوف الإدخال حتى بلا تحديث حيّ
   if (predLockTimer) { clearTimeout(predLockTimer); predLockTimer = null; }
   if (registered && acceptsEntries) {
     const now = Date.now();
@@ -536,7 +561,7 @@ function renderCompView(root, state, comp, comps, cache, show) {
         ? Math.min(min, m.locks_at) : min, Infinity);
     if (nextLock !== Infinity) {
       const delay = Math.min(nextLock - now + 500, 6 * 60 * 60 * 1000);   // هامش نصف ثانية، بحدّ 6 ساعات
-      predLockTimer = setTimeout(() => show(false), Math.max(1000, delay));
+      predLockTimer = setTimeout(() => rerender(), Math.max(1000, delay));
     }
   }
 }
@@ -571,7 +596,7 @@ function prizesCard(comp) {
 }
 
 // صفّ مباراة واحدة داخل «توقّعاتي»: قابل للإدخال إن كانت مجدولة، وإلا مقفل مع النتيجة والنقاط
-function predictionMatchRow(comp, m, teamById, myPred, cache, show, acceptsEntries) {
+function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries) {
   const home = teamById.get(m.home_team_id)?.name || "—";
   const away = teamById.get(m.away_team_id)?.name || "—";
   const editable = acceptsEntries && isPredictable(m);
@@ -581,22 +606,15 @@ function predictionMatchRow(comp, m, teamById, myPred, cache, show, acceptsEntri
   if (editable) {
     const inH = el("input.input.pc-num", { type: "number", inputmode: "numeric", min: 0, max: 99, value: myPred?.home ?? "" });
     const inA = el("input.input.pc-num", { type: "number", inputmode: "numeric", min: 0, max: 99, value: myPred?.away ?? "" });
-    const saveBtn = el("button.btn.btn-sm.btn-primary.pc-save", { type: "button", text: "💾", title: t.savePrediction });
+    const saveBtn = el("button.btn.btn-sm.pc-save", { type: "button", text: "💾", title: t.savePrediction });
     saveBtn.addEventListener("click", async () => {
       if (inH.value === "" || inA.value === "") return toast(t.yourGuess + "؟", "err");
       const hi = parseInt(inH.value, 10), ai = parseInt(inA.value, 10);
       if (!(hi >= 0 && hi <= 99 && ai >= 0 && ai <= 99)) return toast(t.errorGeneric, "err");
       saveBtn.disabled = true;
-      try {
-        const saved = await savePrediction(comp, m, hi, ai);
-        cache.myPredictions = (cache.myPredictions || []).filter((p) => p.match_id !== m.id);
-        cache.myPredictions.push(saved);
-        // نُبقي كاش الترتيب متّسقاً (المعرّف ثابت لكل مباراة/متوقّع)
-        cache.predictions = (cache.predictions || []).filter((p) => p.id !== saved.id);
-        cache.predictions.push(saved);
-        toast(t.predictionSaved, "ok");
-        show(false);
-      } catch (e) { saveBtn.disabled = false; toast(e.message || t.errorGeneric, "err"); }
+      try { await savePrediction(comp, m, hi, ai); toast(t.predictionSaved, "ok"); }   // onSnapshot يعيد الرسم بالقيمة المؤكَّدة
+      catch (e) { toast(e.message || t.errorGeneric, "err"); }
+      finally { saveBtn.disabled = false; }
     });
     return el("div.pc-row", {}, [nameH, el("div.pc-row-mid", {}, [inH, el("span.pc-colon", { text: ":" }), inA]), nameA, saveBtn]);
   }
@@ -622,8 +640,10 @@ function predictionMatchRow(comp, m, teamById, myPred, cache, show, acceptsEntri
 }
 
 // نموذج التسجيل/تعديل البيانات (اسم ثلاثي + هاتف/بريد + عمر)
-function openRegisterModal(comp, cache, show, isEdit) {
-  const nameI = el("input.input", { type: "text", maxlength: "60", placeholder: t.regNamePlaceholder, value: isEdit ? (cache.myPredictor?.name || "") : "" });
+function openRegisterModal(comp, state, isEdit) {
+  const live = getCompCache(comp.id);
+  const myName = (isEdit && live) ? (live.predictors.find((p) => p.uid === currentUid())?.name || "") : "";
+  const nameI = el("input.input", { type: "text", maxlength: "60", placeholder: t.regNamePlaceholder, value: myName });
   const phoneI = el("input.input", { type: "tel", maxlength: "40", placeholder: t.regPhonePlaceholder, style: "direction:ltr;text-align:end" });
   const emailI = el("input.input", { type: "email", maxlength: "120", style: "direction:ltr;text-align:end" });
   const ageI = el("input.input", { type: "number", min: "5", max: "120", inputmode: "numeric" });
@@ -653,26 +673,21 @@ function openRegisterModal(comp, cache, show, isEdit) {
     const phone = phoneI.value.trim(), email = emailI.value.trim();
     const ageRaw = ageI.value.trim();
     if (name.split(/\s+/).filter(Boolean).length < 3) return showErr(t.regNameShort);
-    if (!phone && !email) return showErr(t.regContactRequired);
+    // مطابقة قاعدة القبول: الهاتف أو البريد ٣ أحرف على الأقل (يمنع تسجيلاً ناقصاً يرفضه الخادم)
+    if (phone.length < 3 && email.length < 3) return showErr(t.regContactRequired);
     const age = ageRaw === "" ? null : parseInt(ageRaw, 10);
     if (age != null && !(age >= 5 && age <= 120)) return showErr(t.regAgeInvalid);
     submit.disabled = true; submit.textContent = t.loading;
     try {
       if (isEdit) {
         await updateMyPredictor(comp, currentUid(), { name, phone, email, age });
-        if (cache.myPredictor) cache.myPredictor.name = name;
-        const inBoard = (cache.predictors || []).find((p) => p.uid === cache.myPredictor?.uid);
-        if (inBoard) inBoard.name = name;
         toast(t.infoUpdated, "ok");
       } else {
-        const r = await registerPredictor(comp, { name, phone, email, age });
-        cache.myPredictor = { uid: r.uid, name, competition_id: comp.id, tournament_id: comp.tournament_id };
-        cache.myPredictions = [];
-        // أضِفه إلى قائمة الترتيب فوراً (بصفر نقاط)
-        (cache.predictors ||= []).push({ uid: r.uid, name, competition_id: comp.id, tournament_id: comp.tournament_id });
+        await registerPredictor(comp, { name, phone, email, age });
+        state.predSubTab = "mine";             // بعد الانضمام: انتقل مباشرةً لإدخال التوقّعات
         toast(t.regDone, "ok");
       }
-      close(); show(false);
+      close();                                 // onSnapshot يعيد رسم التبويب بالحالة الجديدة
     } catch (e2) {
       console.error(e2);
       submit.disabled = false; submit.textContent = isEdit ? t.save : t.regSubmit;

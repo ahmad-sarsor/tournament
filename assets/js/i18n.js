@@ -398,7 +398,12 @@ export const t = {
   predictionOpen: "متاحة للتوقّع",
 
   // جدول ترتيب المتوقّعين
-  predLeaderboard: "ترتيب المتوقّعين",
+  predLeaderboard: "الترتيب",
+  liveBoardNote: "مباشر · يتغيّر الترتيب فور انتهاء المباريات",
+  predictionsCtaSub: "توقّع نتائج المباريات ونافس على الجوائز 🏆",
+  predictionsCtaBtn: "ادخل وتوقّع ‹",
+  exportImage: "صورة الترتيب",
+  imageReady: "تم تنزيل صورة الترتيب",
   th_predictor: "المتوقّع",
   th_pts_total: "النقاط",
   th_exact: "نتيجة مضبوطة",

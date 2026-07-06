@@ -1011,3 +1011,29 @@ export function computePredictionStandings(predictors, predictions, matches, com
     String(a.predictor.name || "").localeCompare(String(b.predictor.name || ""), "ar"));
   return list.map((r, i) => ({ ...r, rank: i + 1 }));
 }
+
+// ---- اشتراك حيّ لمسابقة (جدول ترتيب مباشر) ---------------------------------
+//  onSnapshot على المتوقّعين والتوقّعات: بعد اللقطة الأولى لا يُحاسَب إلا على التغييرات.
+const compCache = new Map(); // compId -> { predictors, predictions, ready }
+export function getCompCache(compId) {
+  const c = compCache.get(compId);
+  return c && c.ready ? { predictors: [...c.predictors], predictions: [...c.predictions] } : null;
+}
+export function subscribeCompetition(compId, onChange) {
+  if (!db) return () => {};
+  const c = { predictors: [], predictions: [], ready: false };
+  compCache.set(compId, c);
+  const delivered = new Set();
+  let t = null;
+  const emit = () => { clearTimeout(t); t = setTimeout(() => { if (c.ready) onChange(); }, 250); };
+  const onColl = (key, snap) => {
+    c[key] = mapDocs(snap);
+    if (!c.ready) { delivered.add(key); if (delivered.size >= 2) { c.ready = true; onChange(); } }
+    else emit();
+  };
+  const mk = (key, coll) => onSnapshot(
+    query(collection(db, coll), where("competition_id", "==", compId)),
+    (snap) => onColl(key, snap), (err) => console.error(err));
+  const unsubs = [mk("predictors", "predictors"), mk("predictions", "predictions")];
+  return () => { clearTimeout(t); compCache.delete(compId); unsubs.forEach((u) => { try { u(); } catch {} }); };
+}

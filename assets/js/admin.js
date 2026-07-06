@@ -644,30 +644,108 @@ async function renderPredictionsAdmin(host, state) {
   catch (e) { return mount(host, el("div.alert.alert-error", { text: e.message || t.errorGeneric })); }
 
   const wrap = el("div", {}, [
-    el("p.page-sub", { style: "margin-bottom:12px", text: t.predictionsIntro }),
-    el("div", { style: "margin-bottom:16px" }, [
-      el("button.btn.btn-primary", { text: t.newCompetition, onclick: () => competitionForm(state, null) }),
+    el("div.pc-adm-intro", {}, [
+      el("span.pc-adm-intro-icon", { text: "🎯" }),
+      el("div", { style: "flex:1;min-width:0" }, [
+        el("div", { style: "font-weight:800;font-size:1.02rem;color:var(--ink)", text: t.predictionComp }),
+        el("p.page-sub", { style: "margin:2px 0 0", text: t.predictionsIntro }),
+      ]),
+      el("button.btn.pc-adm-new", { text: t.newCompetition, onclick: () => competitionForm(state, null) }),
     ]),
   ]);
   if (!comps.length) wrap.appendChild(emptyState("🎯", t.noCompetitions));
 
   for (const c of comps) {
-    wrap.appendChild(el("div.admin-list-item", {}, [
-      el("div.grow", {}, [
-        el("div", { style: "font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap" }, [
-          c.title || t.predictionComp, compStatusBadgeAdmin(c.status),
-          (c.status === "draft") ? el("span.sub", { style: "font-weight:500;color:var(--text-3)", text: "· " + t.pcDraftHint }) : null,
+    wrap.appendChild(el("div.pc-adm-card" + (c.status === "open" ? ".is-open" : ""), {}, [
+      el("div.pc-adm-cardhead", {}, [
+        el("div.grow", {}, [
+          el("div.pc-adm-title", {}, [el("span", { text: c.title || t.predictionComp }), compStatusBadgeAdmin(c.status)]),
+          el("div.pc-adm-sub", { text: scoringSummary(c) }),
+          (c.status === "draft") ? el("div.pc-adm-hintline", { text: "• " + t.pcDraftHint }) : null,
         ]),
-        el("div.sub", { text: scoringSummary(c) }),
+        el("div.pc-adm-icons", {}, [
+          el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => competitionForm(state, c) }),
+          el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeCompetition(c) }),
+        ]),
       ]),
-      el("button.btn.btn-sm.btn-outline", { text: "👥 " + t.viewParticipants, onclick: () => participantsModal(c, tournament) }),
-      el("button.btn.btn-sm.btn-outline", { text: "↗ " + t.shareComp, onclick: () => shareCompetition(c, tournament) }),
-      el("a.btn.btn-sm.btn-outline", { href: `./index.html#/t/${tournament.id}/predictions`, target: "_blank", text: "🏅 " + t.openBoard }),
-      el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => competitionForm(state, c) }),
-      el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeCompetition(c) }),
+      el("div.pc-adm-actions", {}, [
+        el("button.btn.btn-sm", { text: "👥 " + t.viewParticipants, onclick: () => participantsModal(c, tournament) }),
+        el("button.btn.btn-sm", { text: "🖼 " + t.exportImage, onclick: () => exportBoardImageFor(c, tournament) }),
+        el("button.btn.btn-sm", { text: "↗ " + t.shareComp, onclick: () => shareCompetition(c, tournament) }),
+        el("a.btn.btn-sm", { href: `./index.html#/t/${tournament.id}/predictions`, target: "_blank", text: "🏅 " + t.openBoard }),
+      ]),
     ]));
   }
   mount(host, wrap);
+}
+
+// تصدير صورة (PNG) لجدول الترتيب — للمنظّم فقط. يجلب البيانات ثم يرسمها على canvas.
+async function exportBoardImageFor(comp, tournament) {
+  toast(t.loading, "");
+  try {
+    const [predictors, predictions, bundle] = await Promise.all([
+      api.fetchPredictors(comp.id), api.fetchPredictions(comp.id), api.fetchTournamentBundle(tournament.id),
+    ]);
+    const standings = api.computePredictionStandings(predictors, predictions, bundle.matches, comp);
+    if (!standings.length) return toast(t.noParticipants, "err");
+    await exportBoardImage(comp, standings);
+  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+async function exportBoardImage(comp, standings) {
+  try { await document.fonts.ready; } catch {}
+  const rows = standings.slice(0, 60);
+  const W = 680, padX = 26, headH = 118, rowH = 44, footH = 46;
+  const H = headH + Math.max(1, rows.length) * rowH + footH;
+  const s = 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = W * s; canvas.height = H * s;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(s, s);
+  const FONT = "'IBM Plex Sans Arabic','Tajawal',sans-serif";
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, "#241b52"); g.addColorStop(1, "#3b0764");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+  ctx.textAlign = "right"; ctx.fillStyle = "#fff";
+  ctx.font = `800 30px ${FONT}`;
+  ctx.fillText("🏅 " + (comp.title || "ترتيب المتوقّعين"), W - padX, 54);
+  ctx.font = `500 17px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.72)";
+  ctx.fillText("مسابقة التوقّعات · جدول الترتيب", W - padX, 84);
+
+  const y = headH;
+  ctx.font = `700 13px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.5)";
+  ctx.textAlign = "right"; ctx.fillText("المتوقّع", W - 64, y - 12);
+  ctx.textAlign = "left"; ctx.fillText("النقاط", padX + 6, y - 12);
+
+  const medal = (r) => ({ 1: "🥇", 2: "🥈", 3: "🥉" }[r] || String(r));
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i], top3 = r.rank <= 3, ry = y + i * rowH;
+    if (top3 || i % 2) { ctx.fillStyle = top3 ? "rgba(255,255,255,.10)" : "rgba(255,255,255,.04)"; ctx.fillRect(padX - 8, ry, W - 2 * (padX - 8), rowH - 4); }
+    ctx.textAlign = "right"; ctx.font = `800 ${top3 ? 20 : 16}px ${FONT}`;
+    ctx.fillStyle = top3 ? "#fbbf24" : "rgba(255,255,255,.6)";
+    ctx.fillText(medal(r.rank), W - padX, ry + 28);
+    ctx.font = `700 17px ${FONT}`; ctx.fillStyle = "#fff";
+    let name = r.predictor.name || "—", full = name;
+    while (ctx.measureText(name).width > W - 230 && name.length > 4) name = name.slice(0, -2);
+    if (name !== full) name += "…";
+    ctx.fillText(name, W - padX - 46, ry + 28);
+    ctx.textAlign = "left"; ctx.font = `900 19px ${FONT}`; ctx.fillStyle = "#c4b5fd";
+    ctx.fillText(String(r.points), padX + 6, ry + 28);
+  }
+
+  ctx.textAlign = "center"; ctx.font = `500 13px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.45)";
+  ctx.fillText("منصّة البطولات · مسابقة التوقّعات", W / 2, H - 18);
+
+  canvas.toBlob((blob) => {
+    if (!blob) return toast(t.errorGeneric, "err");
+    const url = URL.createObjectURL(blob);
+    const safe = String(comp.title || "leaderboard").replace(/[\\/:*?"<>|]/g, "-").slice(0, 40);
+    const a = el("a", { href: url, download: safe + ".png", style: "display:none" });
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
+    toast(t.imageReady, "ok");
+  }, "image/png");
 }
 
 function competitionForm(state, existing) {

@@ -13,6 +13,9 @@
   --ring:         color-mix(in srgb, var(--brand) 40%, transparent);
 
   --gold:         #f59e0b;   /* لمسة نادرة: المركز الأول */
+  --pc:           #7c3aed;   /* لون مسابقة التوقّعات (بنفسجي مميّز) */
+  --pc-2:         #c026d3;
+  --pc-ink:       #ffffff;
   --win:          #16a34a;
   --draw:         #64748b;
   --loss:         #dc2626;
@@ -51,6 +54,7 @@
     --brand:#3b82f6; --brand-strong:#2563eb; --brand-deep:#1e3a8a; --brand-soft:#13203c; --brand-softer:#17284a;
     --bg:#0a0f1c; --surface:#111a2e; --surface-2:#17223a; --surface-3:#1e2b47; --border:#243150; --border-2:#31405f;
     --ink:#eaf0fb; --text:#dbe4f3; --text-2:#9aa8c2; --text-3:#61708c;
+    --pc:#8b5cf6; --pc-2:#d946ef; --pc-ink:#ffffff;
     --shadow-xs:0 1px 2px rgba(0,0,0,.4); --shadow-sm:0 1px 3px rgba(0,0,0,.45);
     --shadow-md:0 8px 24px -8px rgba(0,0,0,.6); --shadow-lg:0 20px 44px -12px rgba(0,0,0,.7);
   }
@@ -59,6 +63,7 @@
   --brand:#3b82f6; --brand-strong:#2563eb; --brand-deep:#1e3a8a; --brand-soft:#13203c; --brand-softer:#17284a;
   --bg:#0a0f1c; --surface:#111a2e; --surface-2:#17223a; --surface-3:#1e2b47; --border:#243150; --border-2:#31405f;
   --ink:#eaf0fb; --text:#dbe4f3; --text-2:#9aa8c2; --text-3:#61708c;
+  --pc:#8b5cf6; --pc-2:#d946ef; --pc-ink:#ffffff;
   --shadow-xs:0 1px 2px rgba(0,0,0,.4); --shadow-sm:0 1px 3px rgba(0,0,0,.45);
   --shadow-md:0 8px 24px -8px rgba(0,0,0,.6); --shadow-lg:0 20px 44px -12px rgba(0,0,0,.7);
 }
@@ -650,55 +655,146 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .bk-edit-btn { padding: 4px 8px; font-size: .74rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); cursor: pointer; transition: .15s; }
 .bk-edit-btn:hover { color: var(--brand); border-color: var(--brand); }
 
-/* ---- مسابقة التوقّعات (Predictions) ---- */
-.pc-head { margin: 4px 0 16px; }
-.pc-title { font-size: 1.35rem; font-weight: 800; color: var(--ink); }
-.pc-section { margin-top: 22px; }
-.pc-mine { margin-bottom: 16px; }
-.pc-badge-in { display: inline-block; font-weight: 800; font-size: .8rem; color: var(--win); background: color-mix(in srgb, var(--win) 12%, transparent); padding: 3px 10px; border-radius: 999px; }
+/* ============================================================================
+   مسابقة التوقّعات — هوية بصريّة بنفسجيّة مميّزة، عصريّة ومضغوطة
+   ============================================================================ */
+.pc-accent { --a: var(--pc); --a2: var(--pc-2); }
 
-/* بطاقتا الاحتساب + الجوائز جنباً إلى جنب */
-.pc-cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
-.pc-card-title { font-weight: 800; font-size: 1rem; color: var(--ink); margin-bottom: 12px; }
-.pc-score-row, .pc-prize-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+/* لافتة الدعوة البارزة على صفحة البطولة (كي لا تبدو المسابقة «مختبئة») */
+.pc-cta {
+  display: flex; align-items: center; gap: 12px; margin: 2px 0 18px;
+  padding: 12px 16px; border-radius: var(--radius);
+  background: linear-gradient(110deg, var(--pc) 0%, var(--pc-2) 100%);
+  color: var(--pc-ink); box-shadow: 0 8px 22px -10px color-mix(in srgb, var(--pc) 70%, transparent);
+  position: relative; overflow: hidden; transition: transform .15s, box-shadow .15s;
+}
+.pc-cta::after { content: ""; position: absolute; inset-inline-end: -30px; inset-block: -40px; width: 140px; background: rgba(255,255,255,.12); transform: skewX(-18deg); }
+.pc-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -10px color-mix(in srgb, var(--pc) 75%, transparent); }
+.pc-cta-icon { font-size: 1.7rem; line-height: 1; filter: drop-shadow(0 2px 4px rgba(0,0,0,.2)); }
+.pc-cta-body { flex: 1; min-width: 0; position: relative; z-index: 1; }
+.pc-cta-title { font-weight: 800; font-size: 1.02rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-cta-sub { font-size: .82rem; opacity: .92; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-cta-go { font-weight: 800; font-size: .86rem; white-space: nowrap; background: rgba(255,255,255,.2); padding: 7px 12px; border-radius: 999px; position: relative; z-index: 1; }
+
+/* تبويب التوقّعات المميّز ضمن شريط التبويبات */
+.tab.pc-tab { color: var(--pc); font-weight: 700; }
+.tab.pc-tab.active { background: var(--surface); color: var(--pc); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--pc) 40%, transparent), var(--shadow-xs); }
+
+/* رأس المسابقة داخل التبويب */
+.pc-wrap { --a: var(--pc); }
+.pc-hero {
+  border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 16px; color: #fff;
+  background: linear-gradient(135deg, var(--pc) 0%, var(--pc-2) 100%);
+  box-shadow: 0 10px 26px -12px color-mix(in srgb, var(--pc) 70%, transparent);
+}
+.pc-hero-top { display: flex; align-items: center; gap: 12px; }
+.pc-hero-icon { font-size: 1.9rem; line-height: 1; }
+.pc-hero-title { font-weight: 800; font-size: 1.22rem; line-height: 1.2; overflow-wrap: anywhere; }
+.pc-hero-sub { font-size: .78rem; opacity: .85; margin-top: 2px; }
+.pc-hero .badge { background: rgba(255,255,255,.22) !important; color: #fff !important; border-color: transparent !important; }
+.pc-hero-desc { margin: 12px 0 0; font-size: .88rem; opacity: .95; line-height: 1.6; }
+
+/* شريط «أنت مشارك» + صفّ الانضمام (زجاجي فوق التدرّج) */
+.pc-mine-bar, .pc-join-row {
+  display: flex; align-items: center; gap: 10px; margin-top: 14px;
+  background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25);
+  border-radius: 12px; padding: 8px 12px; backdrop-filter: blur(4px);
+}
+.pc-join-row { flex-wrap: wrap; }
+.pc-join-txt { flex: 1; min-width: 140px; font-size: .84rem; opacity: .95; }
+.pc-badge-in { font-weight: 800; font-size: .78rem; background: rgba(255,255,255,.9); color: var(--pc); padding: 3px 10px; border-radius: 999px; }
+.pc-mine-name { font-weight: 800; font-size: .92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pc-note-warn { margin-top: 14px; background: rgba(255,255,255,.16); border-radius: 12px; padding: 10px 12px; font-size: .85rem; }
+/* أزرار فوق التدرّج */
+.pc-btn { background: #fff; color: var(--pc); border-color: transparent; font-weight: 800; }
+.pc-btn:hover { background: #fff; filter: brightness(.96); }
+.btn.btn-xs { padding: 5px 10px; font-size: .78rem; border-radius: 8px; }
+.pc-btn-ghost { background: rgba(255,255,255,.18); color: #fff; border-color: rgba(255,255,255,.35); }
+.pc-btn-ghost:hover { background: rgba(255,255,255,.28); }
+
+/* التبويبات الفرعيّة: الترتيب | توقّعاتي */
+.pc-subtabs { display: inline-flex; gap: 4px; padding: 4px; background: var(--surface-2); border-radius: 12px; margin-bottom: 16px; }
+.pc-subtab { border: 0; background: transparent; cursor: pointer; padding: 8px 16px; border-radius: 9px; font-weight: 700; font-size: .9rem; color: var(--text-2); transition: .15s; }
+.pc-subtab:hover { color: var(--ink); }
+.pc-subtab.active { background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--pc) 60%, transparent); }
+
+.pc-content { animation: pcFade .18s ease; }
+@keyframes pcFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* مؤشّر «مباشر» فوق الجدول */
+.pc-live-line { display: flex; align-items: center; gap: 7px; margin: 0 2px 10px; font-size: .78rem; color: var(--text-2); font-weight: 600; }
+.pc-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--win); box-shadow: 0 0 0 0 color-mix(in srgb, var(--win) 60%, transparent); animation: pcPulse 1.8s infinite; }
+@keyframes pcPulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--win) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+.pc-hint { font-size: .8rem; color: var(--text-3); margin: 0 2px 12px; }
+
+/* بطاقتا الاحتساب + الجوائز — مضغوطتان */
+.pc-cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pc-cards2 .card-pad { padding: 14px 16px; }
+.pc-card-title { font-weight: 800; font-size: .95rem; color: var(--ink); margin-bottom: 10px; }
+.pc-score-row, .pc-prize-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
 .pc-score-row:last-child, .pc-prize-row:last-child { border-bottom: 0; }
-.pc-score-lbl { color: var(--text-2); font-size: .9rem; }
-.pc-score-pts { font-weight: 800; color: var(--brand); white-space: nowrap; }
-.pc-prize-rank { font-size: 1.1rem; min-width: 30px; }
-.pc-prize-txt { flex: 1; text-align: start; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+.pc-score-lbl { color: var(--text-2); font-size: .85rem; }
+.pc-score-pts { font-weight: 800; color: var(--pc); white-space: nowrap; font-size: .9rem; }
+.pc-prize-rank { font-size: 1.05rem; min-width: 28px; }
+.pc-prize-txt { flex: 1; text-align: start; font-weight: 600; font-size: .85rem; color: var(--text); overflow-wrap: anywhere; }
 
-/* صفوف التوقّع */
-.pc-matches { display: flex; flex-direction: column; gap: 8px; }
-.pc-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-xs); }
-.pc-row-team { font-weight: 700; font-size: .88rem; color: var(--ink); overflow-wrap: anywhere; }
+/* صفوف التوقّع — أصغر وأنيق */
+.pc-matches { display: flex; flex-direction: column; gap: 7px; }
+.pc-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow-xs); }
+.pc-row-team { font-weight: 700; font-size: .85rem; color: var(--ink); overflow-wrap: anywhere; }
 .pc-row-team:first-child { text-align: start; }
 .pc-row > .pc-row-team:nth-child(3) { text-align: end; }
 .pc-row-mid { display: flex; align-items: center; gap: 4px; justify-content: center; }
 .pc-colon { font-weight: 800; color: var(--text-3); }
-.pc-num { width: 46px; text-align: center; padding: 8px 4px; -moz-appearance: textfield; }
+.pc-num { width: 42px; text-align: center; padding: 7px 4px; font-weight: 700; -moz-appearance: textfield; }
+.pc-num:focus { border-color: var(--pc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pc) 25%, transparent); }
 .pc-num::-webkit-outer-spin-button, .pc-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.pc-save { min-width: 40px; }
+.pc-save { min-width: 38px; background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; border-color: transparent; font-weight: 700; }
+.pc-save:hover { filter: brightness(1.06); background: linear-gradient(135deg, var(--pc), var(--pc-2)); }
 .pc-result { font-weight: 900; font-size: 1rem; color: var(--ink); }
 .pc-result.is-live { color: var(--live); }
 .pc-row-locked { background: var(--surface-2); }
 .pc-row-meta { display: flex; align-items: center; gap: 8px; justify-content: flex-end; grid-column: 1 / -1; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 2px; }
-.pc-guess { font-size: .8rem; color: var(--text-2); }
-.pc-lock-note { font-size: .78rem; color: var(--text-3); font-weight: 600; }
-.pc-pts { font-weight: 800; font-size: .82rem; color: var(--text-3); background: var(--surface-3); padding: 2px 8px; border-radius: 999px; }
+.pc-guess { font-size: .78rem; color: var(--text-2); }
+.pc-lock-note { font-size: .76rem; color: var(--text-3); font-weight: 600; }
+.pc-pts { font-weight: 800; font-size: .8rem; color: var(--text-3); background: var(--surface-3); padding: 2px 8px; border-radius: 999px; }
 .pc-pts.pos { color: var(--win); background: color-mix(in srgb, var(--win) 13%, transparent); }
 
-/* شارات جدول ترتيب المتوقّعين */
-.prize-chip { display: inline-block; margin-inline-start: 8px; font-size: .72rem; font-weight: 700; color: #b45309; background: color-mix(in srgb, var(--gold) 15%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
-.me-chip { display: inline-block; margin-inline-start: 8px; font-size: .72rem; font-weight: 700; color: var(--brand); background: var(--brand-soft); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
-table.standings tbody tr.is-me td { background: color-mix(in srgb, var(--brand) 10%, transparent); }
-table.standings tbody tr.is-me td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+/* شارات جدول الترتيب — بلون المسابقة */
+.prize-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: #b45309; background: color-mix(in srgb, var(--gold) 15%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+.me-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: var(--pc); background: color-mix(in srgb, var(--pc) 12%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+table.standings tbody tr.is-me td { background: color-mix(in srgb, var(--pc) 9%, transparent); }
+table.standings tbody tr.is-me td:first-child { box-shadow: inset 3px 0 0 var(--pc); }
 
 /* شبكة نقاط الاحتساب في نموذج الإدارة */
 .pc-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
 .pc-grid3 .field { margin-bottom: 0; }
 
+/* بطاقات إدارة المسابقة (لوحة المنظّم) */
+.pc-adm-intro { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 18px; border-radius: var(--radius);
+  background: linear-gradient(120deg, color-mix(in srgb, var(--pc) 14%, var(--surface)), color-mix(in srgb, var(--pc-2) 10%, var(--surface)));
+  border: 1px solid color-mix(in srgb, var(--pc) 28%, var(--border)); }
+.pc-adm-intro-icon { font-size: 1.9rem; line-height: 1; }
+.pc-adm-new { background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; border-color: transparent; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--pc) 55%, transparent); }
+.pc-adm-new:hover { filter: brightness(1.07); background: linear-gradient(135deg, var(--pc), var(--pc-2)); }
+
+.pc-adm-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-sm); padding: 14px 16px; margin-bottom: 12px; border-inline-start: 4px solid color-mix(in srgb, var(--pc) 45%, var(--border)); }
+.pc-adm-card.is-open { border-inline-start-color: var(--pc); background: linear-gradient(90deg, color-mix(in srgb, var(--pc) 5%, var(--surface)), var(--surface) 60%); }
+.pc-adm-cardhead { display: flex; align-items: flex-start; gap: 10px; }
+.pc-adm-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 800; font-size: 1.05rem; color: var(--ink); }
+.pc-adm-sub { color: var(--text-2); font-size: .82rem; margin-top: 4px; }
+.pc-adm-hintline { color: var(--text-3); font-size: .8rem; margin-top: 4px; }
+.pc-adm-icons { display: flex; gap: 2px; flex-shrink: 0; }
+.pc-adm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.pc-adm-actions .btn { border-color: var(--border); }
+.pc-adm-actions .btn:hover { border-color: var(--pc); color: var(--pc); }
+
 @media (max-width: 560px) {
   .pc-cards2 { grid-template-columns: 1fr; }
-  .pc-row-team { font-size: .82rem; }
-  .pc-num { width: 40px; }
+  .pc-row-team { font-size: .8rem; }
+  .pc-num { width: 38px; }
+  .pc-hero-title { font-size: 1.1rem; }
+  .pc-cta-sub { display: none; }
+  .pc-adm-intro { flex-wrap: wrap; }
+  .pc-adm-new { width: 100%; }
 }
