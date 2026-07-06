@@ -85,7 +85,6 @@ export function openSettings({ isAdmin = false, session = null, onSignOut = null
 
   const footer = [];
   if (!isAdmin) footer.push(el("button.btn.btn-outline.btn-block", { type: "button", text: "💡 " + t.suggestBox, onclick: openSuggestionModal }));
-  if (!isAdmin && !session) footer.push(el("a.btn.btn-outline.btn-block", { href: "./admin.html", text: "🔒 " + t.organizerPanel }));
   // مسجَّل الدخول: عرض بريده + زر تسجيل الخروج
   if (session && onSignOut) {
     const email = session.user?.email || "";

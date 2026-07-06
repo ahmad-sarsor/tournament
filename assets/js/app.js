@@ -147,6 +147,7 @@ async function renderTournament(id, tab) {
     el("a.btn.btn-outline", { href: "#/", text: t.backToTournaments }));
 
   const state = { tournament, bundle: await fetchTournamentBundle(id), tab };
+  state.mgrCtx = await managerContext();   // لإظهار زر «إدارة البطولة» للمخوَّلين
   scheduleAnchorPending = true;         // فتح جديد للصفحة ← اسمح بالتمرير التلقائي في البرنامج
   renderTournamentShell(state);
 
@@ -181,6 +182,10 @@ function renderTournamentShell(state) {
         el("h1.page-title", { text: tournament.name }),
         statusBadge(tournament.status),
         shareBtn(tournament.name),
+        // زر «إدارة البطولة» يظهر فقط لمن يملك صلاحية عليها (لا للزائر العادي)
+        canManageWith(state.mgrCtx, tournament)
+          ? el("a.btn.btn-sm.btn-primary", { href: `./admin.html#/t/${tournament.id}`, text: "⚙️ " + t.manageTournament })
+          : null,
       ]),
       tournament.description ? el("p.page-sub", { text: tournament.description }) : null,
     ]),
@@ -526,18 +531,22 @@ function renderStandings(state) {
 
 // ---- صفحة المباراة (مستقلّة، مثل 365) --------------------------------------
 
-// هل يستطيع الزائر الحالي إدارة/تسجيل هذا التورنير؟ (لإظهار زر «إدارة المباراة»)
-async function canManageTournament(tournament) {
+// سياق المدير الحالي (بريد موثَّق + هل هو مدير منصّة) — يُحسب مرّة ويُعاد استخدامه
+async function managerContext() {
   const s = await getSession();
   const u = s?.user;
-  if (!u || !u.email || !u.emailVerified) return false;   // الكتابة تتطلّب بريداً موثَّقاً
-  const email = u.email.toLowerCase();
-  if (isOwnerEmail(email)) return true;
-  const inList = (arr) => Array.isArray(arr) && arr.some((x) => String(x).toLowerCase() === email);
-  if (String(tournament.owner_email || "").toLowerCase() === email) return true;
-  if (inList(tournament.admin_emails) || inList(tournament.scorer_emails)) return true;
-  return await amIPlatformAdmin();
+  if (!u || !u.email || !u.emailVerified) return null;   // الكتابة تتطلّب بريداً موثَّقاً
+  return { email: u.email.toLowerCase(), platformAdmin: isOwnerEmail(u.email) || await amIPlatformAdmin() };
 }
+// هل يملك صاحب هذا السياق صلاحية على التورنير؟ (تحقّق متزامن)
+function canManageWith(ctx, tr) {
+  if (!ctx || !tr) return false;
+  if (ctx.platformAdmin) return true;
+  const inList = (arr) => Array.isArray(arr) && arr.some((x) => String(x).toLowerCase() === ctx.email);
+  return String(tr.owner_email || "").toLowerCase() === ctx.email
+    || inList(tr.admin_emails) || inList(tr.scorer_emails);
+}
+async function canManageTournament(tr) { return canManageWith(await managerContext(), tr); }
 
 async function renderMatchDetail(id, matchId) {
   mount(app, spinner());
