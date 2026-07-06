@@ -68,11 +68,22 @@ export async function fetchMyTournaments(email) {
 }
 
 export async function fetchTournament(id) {
+  const cached = bundleCache.get(id);   // وثيقة البطولة تبقى محدَّثة عبر onSnapshot
+  if (cached && cached.ready && cached.tournament) return { ...cached.tournament };
   const s = await getDoc(doc(requireDb(), "tournaments", id));
   return s.exists() ? { id: s.id, ...s.data() } : null;
 }
 
+// كاش حيّ يُغذّيه subscribeTournament من الـ onSnapshot — يجنّبنا إعادة جلب كامل عند كل تغيير
+const bundleCache = new Map(); // tid -> { groups, teams, matches, players, events, tournament, ready }
+const cloneBundle = (c) => ({
+  groups: [...(c.groups || [])], teams: [...(c.teams || [])], matches: [...(c.matches || [])],
+  players: [...(c.players || [])], events: [...(c.events || [])],
+});
+
 export async function fetchTournamentBundle(tid) {
+  const cached = bundleCache.get(tid);
+  if (cached && cached.ready) return cloneBundle(cached);   // من الاشتراك الحيّ: صفر قراءات
   const d = requireDb();
   const [g, tm, mt, pl, ev] = await Promise.all([
     getDocs(query(collection(d, "groups"), where("tournament_id", "==", tid))),
@@ -660,15 +671,35 @@ function skipFirst(fn) {
 
 export function subscribeTournament(tid, onChange) {
   if (!db) return () => {};
+  // نحتفظ بأحدث لقطة لكل مجموعة في الكاش؛ onSnapshot يسلّم المتغيّر فقط (قراءات قليلة)،
+  // وعند أي تغيير نستدعي onChange مرّة واحدة — والمستهلك يقرأ الكاش بلا أي جلب كامل.
+  const c = { groups: [], teams: [], matches: [], players: [], events: [], tournament: null, ready: false };
+  bundleCache.set(tid, c);
+  const sorters = {
+    groups: (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+    teams: (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+    matches: byMatchOrder,
+    players: (a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0),
+    events: byEventOrder,
+  };
+  const delivered = new Set();
+  let t = null;
+  const emit = () => { clearTimeout(t); t = setTimeout(() => { if (c.ready) onChange(); }, 250); };
+  const onColl = (coll, snap) => {
+    c[coll] = mapDocs(snap).sort(sorters[coll]);
+    if (!c.ready) { delivered.add(coll); if (delivered.size >= 5) c.ready = true; } // أول تهيئة بلا onChange
+    else emit();
+  };
   const mk = (coll) => onSnapshot(
     query(collection(db, coll), where("tournament_id", "==", tid)),
-    skipFirst(() => onChange()),
+    (snap) => onColl(coll, snap),
     (err) => console.error(err)
   );
   const unsubs = [
-    mk("matches"), mk("teams"), mk("groups"), mk("players"), mk("events"),
-    // تغييرات على البطولة نفسها (النقاط/المتأهّلون/الحالة/الاسم)
-    onSnapshot(doc(db, "tournaments", tid), skipFirst(() => onChange()), (err) => console.error(err)),
+    mk("groups"), mk("teams"), mk("matches"), mk("players"), mk("events"),
+    onSnapshot(doc(db, "tournaments", tid),
+      (s) => { c.tournament = s.exists() ? { id: s.id, ...s.data() } : null; if (c.ready) emit(); },
+      (err) => console.error(err)),
   ];
-  return () => unsubs.forEach((u) => { try { u(); } catch {} });
+  return () => { clearTimeout(t); bundleCache.delete(tid); unsubs.forEach((u) => { try { u(); } catch {} }); };
 }
