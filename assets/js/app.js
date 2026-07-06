@@ -456,32 +456,59 @@ function renderSchedule(state) {
   const groupById = new Map(bundle.groups.map((x) => [x.id, x]));
   const wrap = el("div");
 
-  // مرشّحات البيوت
-  let activeGroup = "all";
+  // فلاتر متراكبة (AND): بيت + فريق + تاريخ
+  let activeGroup = "all", activeTeam = "all", activeDate = "all";
   const listHost = el("div");
-  const chips = el("div.filters");
-  const currentMatches = () => activeGroup === "all"
-    ? bundle.matches
-    : bundle.matches.filter((m) => m.group_id === activeGroup);
+  const currentMatches = () => bundle.matches.filter((m) =>
+    (activeGroup === "all" || m.group_id === activeGroup)
+    && (activeTeam === "all" || m.home_team_id === activeTeam || m.away_team_id === activeTeam)
+    && (activeDate === "all" || (m.match_date || "") === activeDate));
+
   const rerenderList = (scrollToAnchor) => {
     const matches = currentMatches();
     mount(listHost, renderScheduleDays(matches, teamById, groupById, { tid: tournament.id }));
     if (scrollToAnchor) {
       const date = pickAnchorDate(matches);
-      // بعد أن يُنفّذ route() الأمر scrollTo(0,0)، لذا نؤجّل لإطار العرض التالي
       requestAnimationFrame(() => scrollToDay(listHost, date));
     }
   };
-  const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
-    text: label,
-    // تغيير الفلتر ← نعيد الانتقال لليوم المناسب داخل نتائج البيت المختار
-    onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerenderList(true); },
-  });
+
+  const filters = el("div.sched-filters");
+
+  // مرشّح البيوت (أزرار) — عند وجود أكثر من بيت
   if (bundle.groups.length > 1) {
+    const chips = el("div.filters");
+    const makeChip = (label, val) => el("button.chip" + (val === activeGroup ? ".active" : ""), {
+      text: label,
+      onclick: (e) => { activeGroup = val; [...chips.children].forEach((c) => c.classList.toggle("active", c === e.currentTarget)); rerenderList(true); },
+    });
     chips.appendChild(makeChip(t.allGroups, "all"));
     for (const g of bundle.groups) chips.appendChild(makeChip(g.name, g.id));
-    wrap.appendChild(chips);
+    filters.appendChild(chips);
   }
+
+  // مرشّحا الفريق والتاريخ (قوائم منسدلة)
+  const selects = el("div.filter-selects");
+  if (bundle.teams.length) {
+    const teams = [...bundle.teams].sort((a, b) =>
+      (a.sort_order ?? 0) - (b.sort_order ?? 0) || String(a.name || "").localeCompare(String(b.name || "")));
+    selects.appendChild(el("select.input.filter-select", {
+      "aria-label": t.filterByTeam,
+      onchange: (e) => { activeTeam = e.currentTarget.value; rerenderList(true); },
+    }, [el("option", { value: "all", text: t.allTeams }),
+        ...teams.map((tm) => el("option", { value: tm.id, text: tm.name }))]));
+  }
+  const dates = [...new Set(bundle.matches.map((m) => m.match_date).filter(Boolean))].sort();
+  if (dates.length > 1) {
+    selects.appendChild(el("select.input.filter-select", {
+      "aria-label": t.filterByDate,
+      onchange: (e) => { activeDate = e.currentTarget.value; rerenderList(true); },
+    }, [el("option", { value: "all", text: t.allDays }),
+        ...dates.map((d) => el("option", { value: d, text: weekdayName(d) + " · " + formatDate(d) }))]));
+  }
+  if (selects.children.length) filters.appendChild(selects);
+
+  if (filters.children.length) wrap.appendChild(filters);
   wrap.appendChild(listHost);
 
   // تمرير تلقائي عند فتح التبويب فقط (لا مع التحديث اللحظي الذي يعيد الرسم)

@@ -21,6 +21,9 @@ export const t = {
   // البرنامج
   allDays: "كل الأيام",
   allGroups: "كل البيوت",
+  allTeams: "كل الفرق",
+  filterByTeam: "تصفية حسب الفريق",
+  filterByDate: "تصفية حسب اليوم",
   matchPending: "لم تُلعب",
   live: "مباشر",
   vs: "×",
