@@ -3,7 +3,46 @@
 // ============================================================================
 import { el } from "./util.js";
 import { t, formatTime, formatDate, weekdayName } from "./i18n.js";
-import { computeGroupStandings, isCounted } from "./data.js";
+import { computeGroupStandings, isCounted, knockoutWinner } from "./data.js";
+
+// اسم جولة الخروج حسب قربها من النهائي
+export function knockoutRoundName(r, totalRounds) {
+  const fromEnd = totalRounds - r;
+  return { 0: "النهائي", 1: "نصف النهائي", 2: "ربع النهائي", 3: "دور الـ16", 4: "دور الـ32" }[fromEnd] || ("الجولة " + r);
+}
+
+// بطاقة مباراة في الشجرة
+function bracketMatch(m, teamById, tid) {
+  const home = teamById.get(m.home_team_id), away = teamById.get(m.away_team_id);
+  const finished = m.status === "finished" && m.home_score != null && m.away_score != null;
+  const winner = knockoutWinner(m);
+  const side = (team, teamId, score) => el("div.bk-side" + (winner && winner === teamId ? ".bk-win" : ""), {}, [
+    el("span.bk-team", { text: team ? team.name : (teamId ? "—" : t.tbd) }),
+    el("span.bk-score", { text: finished ? String(score ?? 0) : "" }),
+  ]);
+  const card = el("div.bk-match" + (m.status === "live" ? ".is-live" : ""), {}, [
+    side(home, m.home_team_id, m.home_score),
+    side(away, m.away_team_id, m.away_score),
+  ]);
+  return (m.home_team_id && m.away_team_id && tid) ? el("a.bk-link", { href: `#/t/${tid}/m/${m.id}` }, [card]) : card;
+}
+
+// شجرة خروج المغلوب (أعمدة لكل جولة) — تُستخدم في الواجهة والإدارة
+export function renderBracket(matches, teamById, opts = {}) {
+  const ko = (matches || []).filter((m) => m.stage === "knockout")
+    .sort((a, b) => (a.round - b.round) || (a.bracket_pos - b.bracket_pos));
+  if (!ko.length) return el("div.empty", {}, [el("div.icon", { text: "🏆" }), el("div", { text: t.noKnockout })]);
+  const rounds = Math.max(...ko.map((m) => m.round));
+  const scroller = el("div.bracket-scroll");
+  const wrap = el("div.bracket");
+  for (let r = 1; r <= rounds; r++) {
+    const col = el("div.bracket-col", {}, [el("div.bracket-round-title", { text: knockoutRoundName(r, rounds) })]);
+    for (const m of ko.filter((x) => x.round === r)) col.appendChild(bracketMatch(m, teamById, opts.tid));
+    wrap.appendChild(col);
+  }
+  scroller.appendChild(wrap);
+  return scroller;
+}
 
 // تجميع المباريات حسب اليوم (بالترتيب)
 export function groupByDay(matches) {

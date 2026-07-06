@@ -9,7 +9,7 @@ import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
   getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail,
 } from "./data.js";
-import { renderScheduleDays, standingsTable, eventsTimeline } from "./render.js";
+import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
@@ -166,9 +166,11 @@ async function renderTournament(id, tab) {
 
 function renderTournamentShell(state) {
   const { tournament } = state;
+  const hasKnockout = (state.bundle.matches || []).some((m) => m.stage === "knockout");
   const tabs = el("div.tabs", { role: "tablist" }, [
     tabBtn(t.schedule, tournament.id, "schedule", state.tab),
     tabBtn(t.standings, tournament.id, "standings", state.tab),
+    hasKnockout ? tabBtn(t.knockout, tournament.id, "knockout", state.tab) : null,
     tabBtn(t.teamsTab, tournament.id, "teams", state.tab),
     tabBtn(t.statsTab, tournament.id, "stats", state.tab),
   ]);
@@ -221,9 +223,19 @@ function renderTabContent(state) {
   if (!host) return;
   clear(host);
   if (state.tab === "standings") host.appendChild(renderStandings(state));
+  else if (state.tab === "knockout") host.appendChild(renderKnockout(state));
   else if (state.tab === "teams") host.appendChild(renderTeams(state));
   else if (state.tab === "stats") host.appendChild(renderStats(state));
   else host.appendChild(renderSchedule(state));
+}
+
+function renderKnockout(state) {
+  const { bundle } = state;
+  const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
+  return el("div", {}, [
+    renderBracket(bundle.matches, teamById, { tid: state.tournament.id }),
+    el("p.set-hint", { style: "margin-top:14px", text: t.knockoutHint }),
+  ]);
 }
 
 // ---- تبويب الإحصائيات ------------------------------------------------------

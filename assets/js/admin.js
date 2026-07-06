@@ -5,7 +5,7 @@ import { isConfigured } from "./firebase.js";
 import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog } from "./util.js";
 import * as api from "./data.js";
-import { groupByDay, eventIcon } from "./render.js";
+import { groupByDay, eventIcon, renderBracket } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
@@ -597,6 +597,7 @@ async function renderTournamentAdmin(id, tab) {
 
   const tabs = scorerOnly ? null : el("div.tabs", {}, [
     adminTab(t.manageMatches, id, "matches", tab),
+    adminTab(t.knockout, id, "knockout", tab),
     adminTab(t.teamsTab, id, "teams", tab),
     adminTab(t.manageGroups, id, "groups", tab),
     adminTab(t.editTournament, id, "details", tab),
@@ -615,7 +616,44 @@ async function renderTournamentAdmin(id, tab) {
   if (tab === "teams") renderTeamsAdmin(content, state);
   else if (tab === "groups") renderGroupsAdmin(content, state);
   else if (tab === "matches") renderMatchesTab(content, state);
+  else if (tab === "knockout") renderKnockoutAdmin(content, state);
   else renderDetailsTab(content, state);
+}
+
+// ---- تبويب خروج المغلوب (إدارة) --------------------------------------------
+
+async function renderKnockoutAdmin(host, state) {
+  const { tournament } = state;
+  const bundle = { groups: state.groups, teams: state.teams, matches: state.matches, players: state.players, events: state.events };
+  const teamById = new Map(state.teams.map((x) => [x.id, x]));
+  const hasKo = (state.matches || []).some((m) => m.stage === "knockout");
+
+  // ترقية الفائزين تلقائياً كلّما فُتح التبويب (يعالج البايات ونتائج المباريات)
+  if (hasKo) { try { if (await api.syncKnockoutAdvancement(bundle)) return route(); } catch (e) { console.error(e); } }
+
+  const bar = el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
+    el("button.btn.btn-primary", { type: "button", text: "⚡ " + t.generateKnockout, onclick: () => genKnockout(tournament, bundle) }),
+    hasKo ? el("button.btn.btn-outline", { type: "button", text: "↑ " + t.advanceWinners, onclick: () => advanceKo(bundle) }) : null,
+  ]);
+  mount(host, bar,
+    renderBracket(state.matches, teamById, { tid: tournament.id }),
+    el("p.set-hint", { style: "margin-top:14px", text: t.knockoutHint }));
+}
+
+async function genKnockout(tournament, bundle) {
+  if (!(await confirmDialog(t.regenKnockoutWarn))) return;
+  try {
+    const res = await api.generateKnockout(tournament, bundle);
+    // ترقية البايات فوراً بعد التوليد
+    try { const fresh = await api.fetchTournamentBundle(tournament.id); await api.syncKnockoutAdvancement(fresh); } catch {}
+    toast(t.knockoutGenerated.replace("{n}", String(res.qualifiers)), "ok");
+    route();
+  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+async function advanceKo(bundle) {
+  try { await api.syncKnockoutAdvancement(bundle); toast(t.advancedDone, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
 function adminTab(label, id, tab, active) {

@@ -189,7 +189,7 @@ service cloud.firestore {
     function matchKeys() {
       return ['tournament_id', 'group_id', 'round', 'home_team_id', 'away_team_id',
               'match_date', 'match_time', 'status', 'home_score', 'away_score',
-              'sort_order', 'live_started_at'];
+              'sort_order', 'live_started_at', 'stage', 'bracket_pos'];
     }
     function matchValuesOk(d) {
       return (!('status' in d) || d.status in ['scheduled', 'live', 'finished'])
@@ -200,6 +200,8 @@ service cloud.firestore {
         && okOptStr(d, 'match_date', 20) && okOptStr(d, 'match_time', 20)
         && okOptInt(d, 'round', 0, 999)
         && okOptNum(d, 'sort_order')
+        && (!('stage' in d) || d.stage in ['group', 'knockout'])
+        && okOptInt(d, 'bracket_pos', 0, 999)
         && (!('live_started_at' in d) || d.live_started_at == null || d.live_started_at is number);
     }
     // ما يُسمح لمسجِّل النتائج بتغييره في المباراة
@@ -216,7 +218,7 @@ service cloud.firestore {
           (parentManages(resource.data.tournament_id)
             && changedKeys().hasOnly(['group_id', 'round', 'home_team_id', 'away_team_id',
                  'match_date', 'match_time', 'status', 'home_score', 'away_score',
-                 'sort_order', 'live_started_at']))
+                 'sort_order', 'live_started_at', 'stage', 'bracket_pos']))
           ||
           (parentScores(resource.data.tournament_id)
             && changedKeys().hasOnly(scorerMatchKeys()))

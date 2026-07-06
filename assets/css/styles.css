@@ -629,3 +629,20 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
   font-size: 3rem;
   line-height: 1;
 }
+
+/* ---- شجرة خروج المغلوب (Knockout bracket) ---- */
+.bracket-scroll { overflow-x: auto; padding-bottom: 10px; }
+.bracket { display: flex; gap: 16px; min-width: min-content; padding: 4px 2px; align-items: stretch; }
+.bracket-col { display: flex; flex-direction: column; justify-content: space-around; gap: 12px; min-width: 190px; }
+.bracket-round-title { font-weight: 800; font-size: .9rem; color: var(--brand); text-align: center; margin-bottom: 2px; }
+.bk-match { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-xs); }
+.bk-match.is-live { box-shadow: 0 0 0 2px var(--live), var(--shadow-xs); }
+.bk-link { display: block; }
+.bk-link:hover .bk-match { border-color: var(--brand); box-shadow: var(--shadow-sm); }
+.bk-side { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 11px; }
+.bk-side + .bk-side { border-top: 1px solid var(--border); }
+.bk-team { font-weight: 600; font-size: .88rem; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bk-score { font-weight: 800; color: var(--text-2); min-width: 18px; text-align: center; }
+.bk-win { background: var(--brand-soft); }
+.bk-win .bk-team { color: var(--ink); font-weight: 800; }
+.bk-win .bk-score { color: var(--brand); }

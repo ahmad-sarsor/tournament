@@ -585,6 +585,95 @@ export async function insertMatches(rows) {
   return rows;
 }
 
+// ---- خروج المغلوب (Knockout) -----------------------------------------------
+
+// ترتيب المقاعد لشجرة بحجم n (قوّة 2): بذر قياسي يضمن التباعد (1 ضدّ n، والكبار في أنصاف متقابلة)
+export function bracketSeedOrder(n) {
+  let pls = [1, 2];
+  const rounds = Math.round(Math.log2(n));
+  for (let r = 1; r < rounds; r++) {
+    const sum = pls.length * 2 + 1;
+    const out = [];
+    for (const p of pls) { out.push(p); out.push(sum - p); }
+    pls = out;
+  }
+  return pls;
+}
+
+// المتأهّلون من البيوت: الأوائل (qualifiers_per_group) مرتّبين حسب بذرٍ يباعد أبناء البيت الواحد
+export function computeQualifiers(tournament, groups, teams, matches) {
+  const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
+  const perGroup = Math.max(1, tournament.qualifiers_per_group ?? 2);
+  const ranked = [];
+  groups.forEach((g, gi) => {
+    const gTeams = teams.filter((tm) => tm.group_id === g.id);
+    computeGroupStandings(gTeams, matches, points).slice(0, perGroup)
+      .forEach((row, rank) => ranked.push({ team: row.team, gi, rank }));
+  });
+  // الأوائل أولاً ثم الثواني… ومع كل مرتبة نعكس ترتيب البيوت للتباعد
+  ranked.sort((a, b) => a.rank - b.rank || (a.rank % 2 === 0 ? a.gi - b.gi : b.gi - a.gi));
+  return ranked.map((r) => r.team);
+}
+
+// يولّد شجرة خروج المغلوب كاملةً (يحذف أي شجرة سابقة). البايات تتأهّل تلقائياً.
+export async function generateKnockout(tournament, bundle) {
+  const d = requireDb();
+  const tid = tournament.id;
+  for (const m of (bundle.matches || []).filter((m) => m.stage === "knockout")) {
+    await deleteWhere("events", "match_id", m.id);
+    await deleteDoc(doc(d, "matches", m.id));
+  }
+  const qualifiers = computeQualifiers(tournament, bundle.groups, bundle.teams, bundle.matches);
+  if (qualifiers.length < 2) throw new Error("لا يوجد متأهّلون كافون (فريقان على الأقل)");
+  let B = 2; while (B < qualifiers.length) B *= 2;                 // أقرب قوّة 2
+  const order = bracketSeedOrder(B);
+  let advancing = order.map((seed) => qualifiers[seed - 1] || null); // مقاعد الجولة 1 (null = باي)
+  const rounds = Math.round(Math.log2(B));
+  const rows = [];
+  let sort = 0;
+  for (let r = 1; r <= rounds; r++) {
+    const next = [];
+    for (let pos = 0; pos < advancing.length / 2; pos++) {
+      const home = advancing[pos * 2], away = advancing[pos * 2 + 1];
+      rows.push({
+        tournament_id: tid, group_id: null, stage: "knockout", round: r, bracket_pos: pos,
+        home_team_id: home ? home.id : null, away_team_id: away ? away.id : null,
+        status: "scheduled", home_score: null, away_score: null, sort_order: sort++,
+      });
+      // باي: إن حضر أحدهما فقط تأهّل تلقائياً للجولة التالية
+      next.push(home && !away ? home : (away && !home ? away : null));
+    }
+    advancing = next;
+  }
+  await insertMatches(rows);
+  return { bracketSize: B, rounds, qualifiers: qualifiers.length };
+}
+
+// فائز مباراة خروج مغلوب (باي، أو الأعلى نتيجةً بعد الانتهاء؛ التعادل لا يتأهّل)
+export function knockoutWinner(m) {
+  if (m.home_team_id && !m.away_team_id) return m.home_team_id;
+  if (m.away_team_id && !m.home_team_id) return m.away_team_id;
+  if (m.status === "finished" && m.home_score != null && m.away_score != null && m.home_score !== m.away_score)
+    return m.home_score > m.away_score ? m.home_team_id : m.away_team_id;
+  return null;
+}
+
+// يرقّي الفائزين إلى الجولات التالية (يعمل بلا تكرار — يُستدعى بعد أي نتيجة/توليد)
+export async function syncKnockoutAdvancement(bundle) {
+  const ko = (bundle.matches || []).filter((m) => m.stage === "knockout");
+  const byRP = new Map(ko.map((m) => [m.round + "|" + m.bracket_pos, m]));
+  let changed = 0;
+  for (const m of ko) {
+    const w = knockoutWinner(m);
+    if (!w) continue;
+    const next = byRP.get((m.round + 1) + "|" + Math.floor(m.bracket_pos / 2));
+    if (!next) continue;
+    const slot = m.bracket_pos % 2 === 0 ? "home_team_id" : "away_team_id";
+    if (next[slot] !== w) { await updateMatch(next.id, { [slot]: w }); next[slot] = w; changed++; }
+  }
+  return changed;
+}
+
 // ---- توليد مباريات دوري كامل (طريقة الدائرة) --------------------------------
 
 export function roundRobinPairs(teamIds) {
