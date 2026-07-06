@@ -166,6 +166,39 @@ export function renderScheduleDays(matches, teamById, groupById, extra = {}) {
   return frag;
 }
 
+// جدول ترتيب المتوقّعين (مسابقة التوقّعات) — أوسمة للمراكز الأولى وإبراز الفائزين
+export function predictionBoard(standings, comp, opts = {}) {
+  const { myUid } = opts;
+  const winners = comp?.winners_count ?? 0;
+  const prizes = Array.isArray(comp?.prizes) ? comp.prizes : [];
+  const medal = (r) => ({ 1: "🥇", 2: "🥈", 3: "🥉" }[r] || "");
+  if (!standings.length) {
+    return el("div.empty", {}, [el("div.icon", { text: "🎯" }), el("div", { text: t.noPredictorsYet })]);
+  }
+  const head = el("thead", {}, [el("tr", {}, [
+    el("th.rank-col", { text: t.th_rank }),
+    el("th.team-col", { text: t.th_predictor }),
+    el("th.stat-col", { text: "🎯", title: t.th_exact }),
+    el("th.pts-col", { text: t.th_pts_total }),
+  ])]);
+  const body = el("tbody", {}, standings.map((r) => {
+    const isPrize = winners > 0 && r.rank <= winners;
+    const isMe = myUid && r.predictor.uid === myUid;
+    const prize = isPrize ? (prizes[r.rank - 1] || "") : "";
+    return el("tr" + (r.rank === 1 ? ".champion" : "") + (isPrize ? ".qualify" : "") + (isMe ? ".is-me" : ""), {}, [
+      el("td", {}, [el("span.rank", { text: medal(r.rank) || String(r.rank) })]),
+      el("td.team-col", {}, [
+        el("span.team-name", { text: r.predictor.name || "—" }),
+        prize ? el("span.prize-chip", { text: "🎁 " + prize }) : null,
+        isMe ? el("span.me-chip", { text: t.myRank }) : null,
+      ]),
+      el("td", { text: String(r.exact) }),
+      el("td", {}, [el("span.pts", { text: String(r.points) })]),
+    ]);
+  }));
+  return el("div.table-wrap", {}, [el("table.standings", {}, [head, body])]);
+}
+
 // جدول ترتيب بيت واحد
 export function standingsTable(groupTeams, matches, points, qualifiers) {
   const rows = computeGroupStandings(groupTeams, matches, points);

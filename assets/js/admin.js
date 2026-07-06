@@ -3,7 +3,7 @@
 // ============================================================================
 import { isConfigured } from "./firebase.js";
 import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel } from "./i18n.js";
-import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog } from "./util.js";
+import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog, downloadCsv } from "./util.js";
 import * as api from "./data.js";
 import { groupByDay, eventIcon, renderBracket, knockoutRoundName } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
@@ -43,13 +43,16 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 applyPrefs();
 document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({ isAdmin: true }));
 
+// المتوقّعون يسجّلون مجهولين (Anonymous) — لا يُعدّون جلسة منظّم في هذه اللوحة
+const realSession = (s) => (s && s.user && !s.user.isAnonymous) ? s : null;
+
 async function boot() {
   if (!isConfigured) return renderSetupNeeded();
-  try { session = await api.getSession(); } catch (e) { console.error(e); }
+  try { session = realSession(await api.getSession()); } catch (e) { console.error(e); }
   await refreshRole();
   api.onAuthChange(async (s) => {
-    session = s;
-    if (s) api.syncMyUserDoc().catch(() => {});   // يبقي حالة التوثيق/الاسم محدَّثة
+    session = realSession(s);
+    if (session) api.syncMyUserDoc().catch(() => {});   // يبقي حالة التوثيق/الاسم محدَّثة
     await refreshRole(); renderUserBox(); route(); autoFinishStale();
   });
   window.addEventListener("hashchange", route);
@@ -600,6 +603,7 @@ async function renderTournamentAdmin(id, tab) {
     adminTab(t.knockout, id, "knockout", tab),
     adminTab(t.teamsTab, id, "teams", tab),
     adminTab(t.manageGroups, id, "groups", tab),
+    adminTab("🎯 " + t.predictionsAdmin, id, "predictions", tab),
     adminTab(t.editTournament, id, "details", tab),
   ]);
   const banner = scorerOnly ? el("div.alert.alert-warn", { style: "margin:10px 0 4px" }, [
@@ -617,7 +621,222 @@ async function renderTournamentAdmin(id, tab) {
   else if (tab === "groups") renderGroupsAdmin(content, state);
   else if (tab === "matches") renderMatchesTab(content, state);
   else if (tab === "knockout") renderKnockoutAdmin(content, state);
+  else if (tab === "predictions") renderPredictionsAdmin(content, state);
   else renderDetailsTab(content, state);
+}
+
+// ---- تبويب مسابقة التوقّعات (إدارة) ----------------------------------------
+
+function compStatusBadgeAdmin(status) {
+  const cls = { open: "badge-active", closed: "badge-upcoming", finished: "badge-finished" }[status] || "badge-upcoming";
+  return el("span.badge." + cls, { text: t["pc_status_" + status] || status });
+}
+function scoringSummary(c) {
+  const s = api.compScoring(c);
+  return `${t.scoringExact}: ${s.exact} · ${t.scoringDiff}: ${s.diff} · ${t.scoringOutcome}: ${s.outcome}`;
+}
+
+async function renderPredictionsAdmin(host, state) {
+  const { tournament } = state;
+  mount(host, spinner());
+  let comps = [];
+  try { comps = await api.fetchCompetitionsByTournament(tournament.id); }
+  catch (e) { return mount(host, el("div.alert.alert-error", { text: e.message || t.errorGeneric })); }
+
+  const wrap = el("div", {}, [
+    el("p.page-sub", { style: "margin-bottom:12px", text: t.predictionsIntro }),
+    el("div", { style: "margin-bottom:16px" }, [
+      el("button.btn.btn-primary", { text: t.newCompetition, onclick: () => competitionForm(state, null) }),
+    ]),
+  ]);
+  if (!comps.length) wrap.appendChild(emptyState("🎯", t.noCompetitions));
+
+  for (const c of comps) {
+    wrap.appendChild(el("div.admin-list-item", {}, [
+      el("div.grow", {}, [
+        el("div", { style: "font-weight:800;display:flex;align-items:center;gap:8px;flex-wrap:wrap" }, [
+          c.title || t.predictionComp, compStatusBadgeAdmin(c.status),
+          (c.status === "draft") ? el("span.sub", { style: "font-weight:500;color:var(--text-3)", text: "· " + t.pcDraftHint }) : null,
+        ]),
+        el("div.sub", { text: scoringSummary(c) }),
+      ]),
+      el("button.btn.btn-sm.btn-outline", { text: "👥 " + t.viewParticipants, onclick: () => participantsModal(c, tournament) }),
+      el("button.btn.btn-sm.btn-outline", { text: "↗ " + t.shareComp, onclick: () => shareCompetition(c, tournament) }),
+      el("a.btn.btn-sm.btn-outline", { href: `./index.html#/t/${tournament.id}/predictions`, target: "_blank", text: "🏅 " + t.openBoard }),
+      el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => competitionForm(state, c) }),
+      el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeCompetition(c) }),
+    ]));
+  }
+  mount(host, wrap);
+}
+
+function competitionForm(state, existing) {
+  const { tournament } = state;
+  const numInput = (v) => el("input.input", { type: "number", min: "0", inputmode: "numeric", value: String(v) });
+  const titleI = el("input.input", { type: "text", maxlength: "120", value: existing?.title || "", placeholder: t.compTitlePlaceholder });
+  const descI = el("textarea.input", { rows: "2" }); descI.value = existing?.description || "";
+  const statusSel = el("select.select", {}, ["draft", "open", "closed", "finished"].map((s) => {
+    const o = el("option", { value: s, text: t["pc_status_" + s] });
+    if ((existing?.status || "draft") === s) o.selected = true;
+    return o;
+  }));
+  const exactI = numInput(existing?.pts_exact ?? 5);
+  const diffI = numInput(existing?.pts_diff ?? 3);
+  const outI = numInput(existing?.pts_outcome ?? 2);
+  const winnersI = numInput(existing?.winners_count ?? 3);
+  const prizesI = el("textarea.input", { rows: "4", placeholder: "🥇 …\n🥈 …\n🥉 …" });
+  prizesI.value = Array.isArray(existing?.prizes) ? existing.prizes.join("\n") : "";
+  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
+
+  const body = el("div", {}, [
+    el("div.field", {}, [el("label", { text: t.compTitle }), titleI]),
+    el("div.field", {}, [el("label", { text: t.compDesc }), descI]),
+    el("div.field", {}, [el("label", { text: t.compStatus }), statusSel, el("div.field-hint", { text: t.compLaunchHint })]),
+    el("div.pc-grid3", {}, [
+      el("div.field", {}, [el("label", { text: t.ptsExact }), exactI]),
+      el("div.field", {}, [el("label", { text: t.ptsDiff }), diffI]),
+      el("div.field", {}, [el("label", { text: t.ptsOutcome }), outI]),
+    ]),
+    el("div.field", {}, [el("label", { text: t.winnersCount }), winnersI]),
+    el("div.field", {}, [el("label", { text: t.prizesField }), prizesI, el("div.field-hint", { text: t.prizesFieldHint })]),
+    err,
+  ]);
+
+  let busy = false;
+  async function submit() {
+    if (busy) return;
+    const title = titleI.value.trim();
+    if (!title) { err.hidden = false; err.textContent = "العنوان مطلوب"; return; }
+    const prizes = prizesI.value.split(/\r?\n/).map((s) => s.trim());
+    while (prizes.length && prizes[prizes.length - 1] === "") prizes.pop();
+    const payload = {
+      title,
+      description: descI.value.trim() || null,
+      status: statusSel.value,
+      pts_exact: toInt(exactI.value, 5),
+      pts_diff: toInt(diffI.value, 3),
+      pts_outcome: toInt(outI.value, 2),
+      winners_count: toInt(winnersI.value, 3),
+      prizes,
+    };
+    busy = true;
+    try {
+      if (existing) await api.updateCompetition(existing.id, payload);
+      else await api.createCompetition({ tournament_id: tournament.id, sort_order: Date.now(), ...payload });
+      close(); toast(t.compSaved, "ok"); route();
+    } catch (e) { busy = false; err.hidden = false; err.textContent = e.message || t.errorGeneric; }
+  }
+
+  const close = openModal({
+    title: existing ? "✎ " + t.editCompetition : "🎯 " + t.predictionComp,
+    body,
+    footer: [
+      el("button.btn.btn-primary", { type: "button", text: t.save, onclick: submit }),
+      el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close() }),
+    ],
+  });
+}
+
+async function removeCompetition(c) {
+  if (!(await confirmDialog(t.deleteCompetitionQ))) return;
+  try { await api.deleteCompetition(c.id); toast(t.deleted, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// قائمة المشاركين مع بيانات التواصل والنقاط (للمنظّم فقط)
+async function participantsModal(comp, tournament) {
+  const body = el("div", {}, [spinner()]);
+  openModal({ title: "👥 " + t.participantsTitle, body });
+  try {
+    const [predictors, contacts, predictions, bundle] = await Promise.all([
+      api.fetchPredictors(comp.id), api.fetchPredictorContacts(comp.id),
+      api.fetchPredictions(comp.id), api.fetchTournamentBundle(tournament.id),
+    ]);
+    const contactByUid = new Map(contacts.map((c) => [c.uid, c]));
+    const standings = api.computePredictionStandings(predictors, predictions, bundle.matches, comp);
+    if (!standings.length) { mount(body, emptyState("👥", t.noParticipants)); return; }
+
+    const table = el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:520px" }, [
+      el("thead", {}, [el("tr", {}, [
+        el("th.rank-col", { text: "#" }),
+        el("th.team-col", { text: t.regName }),
+        el("th", { text: t.th_phone }),
+        el("th", { text: t.email }),
+        el("th.stat-col", { text: t.th_age }),
+        el("th.pts-col", { text: t.th_pts_total }),
+      ])]),
+      el("tbody", {}, standings.map((r) => {
+        const c = contactByUid.get(r.predictor.uid) || {};
+        return el("tr" + (r.rank === 1 ? ".champion" : ""), {}, [
+          el("td", {}, [el("span.rank", { text: String(r.rank) })]),
+          el("td.team-col", {}, [el("span.team-name", { text: r.predictor.name || "—" })]),
+          el("td", { style: "direction:ltr;text-align:start", text: c.phone || "—" }),
+          el("td", { style: "direction:ltr;text-align:start;font-size:.8rem", text: c.email || "—" }),
+          el("td", { text: c.age != null ? String(c.age) : "—" }),
+          el("td", {}, [el("span.pts", { text: String(r.points) })]),
+        ]);
+      })),
+    ])]);
+
+    const exportBtn = el("button.btn.btn-sm.btn-primary", { type: "button", text: "⬇ " + t.exportCsv, onclick: () => {
+      const rows = [[t.th_rank, t.regName, t.th_phone, t.email, t.th_age, t.th_pts_total, t.th_exactCol, t.th_hitsCol, t.th_joinedAt]];
+      for (const r of standings) {
+        const c = contactByUid.get(r.predictor.uid) || {};
+        rows.push([r.rank, r.predictor.name || "", c.phone || "", c.email || "", c.age ?? "",
+          r.points, r.exact, r.hits, c.created_at ? fmtWhen(c.created_at) : ""]);
+      }
+      const safe = String(comp.title || "predictions").replace(/[\\/:*?"<>|]/g, "-").slice(0, 40);
+      downloadCsv(`${safe}.csv`, rows);
+      toast(t.csvExported, "ok");
+    } });
+
+    mount(body,
+      el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px" }, [
+        el("span.page-sub", { style: "margin:0", text: `${t.compParticipants}: ${standings.length}` }),
+        exportBtn,
+      ]),
+      table);
+  } catch (e) {
+    mount(body, el("div.alert.alert-error", { text: e.message || t.errorGeneric }));
+  }
+}
+
+// مشاركة رابط المسابقة (نسخ + مشاركة أصليّة + رمز QR)
+function shareCompetition(comp, tournament) {
+  const u = new URL("./index.html", location.href);   // صفحة العرض العامّة (شقيقة admin.html)
+  u.hash = `#/t/${tournament.id}/predictions`;
+  const url = u.href;
+
+  const linkBox = el("input.input", { type: "text", value: url, readonly: true, style: "direction:ltr;text-align:start;font-size:.8rem" });
+  linkBox.addEventListener("focus", () => linkBox.select());
+
+  const copyBtn = el("button.btn.btn-primary", { type: "button", text: "📋 " + t.copyLink, onclick: async () => {
+    try { await navigator.clipboard.writeText(url); toast(t.linkCopied, "ok"); }
+    catch { linkBox.focus(); try { document.execCommand("copy"); toast(t.linkCopied, "ok"); } catch { toast(url, ""); } }
+  } });
+  const shareBtn = navigator.share
+    ? el("button.btn.btn-outline", { type: "button", text: "↗ " + t.share, onclick: async () => {
+        try { await navigator.share({ title: comp.title || t.predictionComp, url }); } catch {}
+      } })
+    : null;
+
+  // رمز QR عبر خدمة صور خارجية (رابط عامّ غير حسّاس)؛ يُخفى تلقائياً إن تعذّر تحميله
+  const qr = el("img", {
+    alt: "QR", width: "200", height: "200",
+    style: "display:block;margin:4px auto 0;border-radius:12px;background:#fff;padding:10px;box-shadow:var(--shadow-sm)",
+    src: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data=${encodeURIComponent(url)}`,
+  });
+  qr.addEventListener("error", () => { qr.style.display = "none"; });
+
+  openModal({
+    title: "↗ " + t.shareCompTitle,
+    body: el("div", {}, [
+      el("p.page-sub", { style: "margin:0 0 14px", text: t.shareCompHint }),
+      qr,
+      el("div.field", { style: "margin-top:16px" }, [el("label", { text: t.competitionLink }), linkBox]),
+      el("div", { style: "display:flex;gap:8px" }, [copyBtn, shareBtn].filter(Boolean)),
+    ]),
+  });
 }
 
 // ---- تبويب خروج المغلوب (إدارة) --------------------------------------------

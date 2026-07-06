@@ -12,7 +12,7 @@ import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
   signOut as fbSignOut, onAuthStateChanged,
   sendEmailVerification, sendPasswordResetEmail,
-  GoogleAuthProvider, signInWithPopup,
+  GoogleAuthProvider, signInWithPopup, signInAnonymously,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
@@ -257,7 +257,7 @@ export async function refreshSession() {
 
 // مزامنة وثيقة المستخدم (الاسم/حالة التوثيق) — تُنشأ أيضاً عند أول دخول Google
 export async function syncMyUserDoc(u = currentUser) {
-  if (!u || !db) return;
+  if (!u || !db || u.isAnonymous) return;   // المستخدمون المجهولون (المتوقّعون) بلا وثيقة users
   const ref = doc(requireDb(), "users", u.uid);
   let snap = null;
   try { snap = await getDoc(ref); } catch { return; } // قبل نشر القواعد الجديدة قد تُرفض القراءة
@@ -450,10 +450,21 @@ export async function deleteTeam(id) {
   await deleteDoc(doc(requireDb(), "teams", id));
 }
 
+// موعد قفل التوقّع = لحظة بدء المباراة (تاريخ+وقت محلّيان) بالمللي ثانية، أو null إن نقص أحدهما
+export function matchLockMillis(date, time) {
+  if (!date || !time) return null;
+  const [y, m, d] = String(date).split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const [hh, mm] = String(time).split(":").map(Number);
+  const ms = new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export async function createMatch(p) {
   const data = { ...p };
   // ختم لحظة البدء عند إنشاء مباراة مباشرة مباشرةً (نادر لكن للاكتمال)
   if (data.status === "live" && data.live_started_at === undefined) data.live_started_at = Date.now();
+  data.locks_at = matchLockMillis(data.match_date, data.match_time);   // موعد قفل التوقّع
   const ref = await addDoc(collection(requireDb(), "matches"), clean(data));
   return { id: ref.id, ...data };
 }
@@ -461,6 +472,8 @@ export async function updateMatch(id, patch) {
   const p = { ...patch };
   // عند أي انتقال إلى «مباشر» نختم لحظة البدء (يغطّي زر البدء، إعادة الفتح، أول هدف، نموذج التعديل)
   if (p.status === "live" && p.live_started_at === undefined) p.live_started_at = Date.now();
+  // إن مسّ التعديل التاريخ/الوقت نعيد حساب موعد قفل التوقّع
+  if ("match_date" in p || "match_time" in p) p.locks_at = matchLockMillis(p.match_date, p.match_time);
   await updateDoc(doc(requireDb(), "matches", id), clean(p));
   return { id, ...p };
 }
@@ -579,7 +592,11 @@ export async function insertMatches(rows) {
   const d = requireDb();
   for (let i = 0; i < rows.length; i += 450) {
     const b = writeBatch(d);
-    for (const row of rows.slice(i, i + 450)) b.set(doc(collection(d, "matches")), clean(row));
+    for (const row of rows.slice(i, i + 450)) {
+      // موعد قفل التوقّع لكل مباراة (null إن بلا تاريخ/وقت — كدوري مولَّد بلا مواعيد)
+      const r = { ...row, locks_at: matchLockMillis(row.match_date, row.match_time) };
+      b.set(doc(collection(d, "matches")), clean(r));
+    }
     await b.commit();
   }
   return rows;
@@ -806,4 +823,191 @@ export function subscribeTournament(tid, onChange) {
       (err) => console.error(err)),
   ];
   return () => { clearTimeout(t); bundleCache.delete(tid); unsubs.forEach((u) => { try { u(); } catch {} }); };
+}
+
+// ============================================================================
+//  مسابقة التوقّعات (Predictions)
+//  • المتوقّع = مستخدم مجهول (Anonymous Auth) لا يحتاج بريداً؛ يسجّل اسمه الثلاثي
+//    وهاتفه/بريده وعمره مرّة واحدة على الجهاز.
+//  • النقاط ثلاث مستويات (قابلة للتعديل لكل مسابقة): النتيجة بالضبط / الاتجاه+الفارق /
+//    الفائز فقط. الترتيب يُحتسب في المتصفّح من المباريات المنتهية.
+// ============================================================================
+
+// معرّف الجهاز الحالي (متوقّع) — يُسجَّل مجهولاً عند أول مشاركة فقط
+export async function ensureAnon() {
+  if (!auth) throw new Error("Firebase not configured");
+  await authReady;                       // ننتظر أوّل حالة مصادقة (قد يكون مسجّلاً مسبقاً)
+  if (auth.currentUser) return auth.currentUser;   // حساب قائم (مجهول أو حقيقي)
+  const cred = await signInAnonymously(auth);
+  return cred.user;
+}
+
+// معرّف المستخدم الحالي إن وُجد (بلا إنشاء حساب جديد) — لفحص «هل أنا مشارك؟»
+export function currentUid() { return auth?.currentUser?.uid || null; }
+
+// ---- المسابقات (pcomps) ----------------------------------------------------
+
+const compDefaults = () => ({ pts_exact: 5, pts_diff: 3, pts_outcome: 2, winners_count: 3 });
+
+export async function fetchCompetitionsByTournament(tid) {
+  const snap = await getDocs(query(collection(requireDb(), "pcomps"), where("tournament_id", "==", tid)));
+  return mapDocs(snap).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || (b.created_at ?? 0) - (a.created_at ?? 0));
+}
+export async function fetchCompetition(id) {
+  const s = await getDoc(doc(requireDb(), "pcomps", id));
+  return s.exists() ? { id: s.id, ...s.data() } : null;
+}
+export async function createCompetition(p) {
+  const data = { ...compDefaults(), ...p, created_at: Date.now() };
+  if (!data.owner_email && currentUser?.email) data.owner_email = currentUser.email.toLowerCase();
+  if (data.owner_email) data.owner_email = String(data.owner_email).toLowerCase();
+  const ref = await addDoc(collection(requireDb(), "pcomps"), clean(data));
+  return { id: ref.id, ...data };
+}
+export async function updateCompetition(id, patch) {
+  await updateDoc(doc(requireDb(), "pcomps", id), clean(patch));
+  return { id, ...patch };
+}
+export async function deleteCompetition(id) {
+  await deleteWhere("predictions", "competition_id", id);
+  await deleteWhere("predictors", "competition_id", id);
+  await deleteWhere("predictorContacts", "competition_id", id);
+  await deleteDoc(doc(requireDb(), "pcomps", id));
+}
+
+// ---- المتوقّعون (تسجيل) ----------------------------------------------------
+
+const predKey = (compId, uid) => `${compId}__${uid}`;
+
+// تسجيل مشارك: وثيقة عامّة (اسم فقط، للترتيب) + وثيقة تواصل خاصّة (هاتف/بريد/عمر)
+export async function registerPredictor(comp, { name, phone, email, age }) {
+  const user = await ensureAnon();
+  const uid = user.uid;
+  const id = predKey(comp.id, uid);
+  const base = { competition_id: comp.id, tournament_id: comp.tournament_id, uid, created_at: Date.now() };
+  await setDoc(doc(requireDb(), "predictors", id), clean({
+    ...base, name: String(name || "").trim().slice(0, 60),
+  }));
+  await setDoc(doc(requireDb(), "predictorContacts", id), clean({
+    ...base,
+    phone: phone ? String(phone).trim().slice(0, 40) : null,
+    email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
+    age: (age == null || age === "") ? null : Math.trunc(Number(age)),
+  }));
+  return { id, uid, name };
+}
+
+// تعديل اسم المشارك ووثيقة تواصله
+export async function updateMyPredictor(comp, uid, { name, phone, email, age }) {
+  const id = predKey(comp.id, uid);
+  await updateDoc(doc(requireDb(), "predictors", id), { name: String(name || "").trim().slice(0, 60) });
+  await updateDoc(doc(requireDb(), "predictorContacts", id), clean({
+    phone: phone ? String(phone).trim().slice(0, 40) : null,
+    email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
+    age: (age == null || age === "") ? null : Math.trunc(Number(age)),
+  }));
+}
+
+export async function fetchMyPredictor(compId, uid) {
+  if (!uid) return null;
+  const s = await getDoc(doc(requireDb(), "predictors", predKey(compId, uid)));
+  return s.exists() ? { id: s.id, ...s.data() } : null;
+}
+export async function fetchMyContact(compId, uid) {
+  if (!uid) return null;
+  try {
+    const s = await getDoc(doc(requireDb(), "predictorContacts", predKey(compId, uid)));
+    return s.exists() ? { id: s.id, ...s.data() } : null;
+  } catch { return null; }
+}
+export async function fetchPredictors(compId) {
+  const snap = await getDocs(query(collection(requireDb(), "predictors"), where("competition_id", "==", compId)));
+  return mapDocs(snap);
+}
+// قائمة التواصل الكاملة — للمنظّم فقط (تفشل للمستخدم العادي بحكم القواعد)
+export async function fetchPredictorContacts(compId) {
+  const snap = await getDocs(query(collection(requireDb(), "predictorContacts"), where("competition_id", "==", compId)));
+  return mapDocs(snap);
+}
+
+// ---- التوقّعات -------------------------------------------------------------
+
+export async function fetchPredictions(compId) {
+  const snap = await getDocs(query(collection(requireDb(), "predictions"), where("competition_id", "==", compId)));
+  return mapDocs(snap);
+}
+export async function fetchMyPredictions(compId, uid) {
+  if (!uid) return [];
+  const snap = await getDocs(query(collection(requireDb(), "predictions"),
+    where("competition_id", "==", compId), where("uid", "==", uid)));
+  return mapDocs(snap);
+}
+
+// حفظ توقّع لمباراة واحدة (معرّف ثابت يمنع التكرار). القواعد تمنع الحفظ بعد بدء المباراة.
+export async function savePrediction(comp, match, home, away) {
+  const user = await ensureAnon();
+  const uid = user.uid;
+  const id = predKey(comp.id, uid) + "__" + match.id;
+  const data = {
+    competition_id: comp.id, tournament_id: comp.tournament_id, match_id: match.id, uid,
+    home: Math.trunc(Number(home)), away: Math.trunc(Number(away)), created_at: Date.now(),
+  };
+  await setDoc(doc(requireDb(), "predictions", id), clean(data));
+  return { id, ...data };
+}
+
+// ---- الاحتساب (دوال صرفة) --------------------------------------------------
+
+export function compScoring(comp) {
+  return {
+    exact: comp?.pts_exact ?? 5,
+    diff: comp?.pts_diff ?? 3,
+    outcome: comp?.pts_outcome ?? 2,
+  };
+}
+
+// هل المباراة قابلة للتوقّع الآن؟ (مجدولة، لها طرفان، ولم يحُن موعد بدئها بعد)
+export function isPredictable(m) {
+  if (m.status !== "scheduled" || !m.home_team_id || !m.away_team_id) return false;
+  if (m.locks_at != null && Date.now() >= m.locks_at) return false;   // حان الموعد → مقفلة
+  return true;
+}
+
+// نقاط توقّع واحد لمباراة منتهية (null إن لم تُحتسب المباراة بعد)
+export function predictionPoints(pred, match, cfg) {
+  if (!isCounted(match)) return null;
+  const ph = pred.home, pa = pred.away;
+  if (ph == null || pa == null) return 0;
+  const ah = match.home_score, aa = match.away_score;
+  if (ph === ah && pa === aa) return cfg.exact;          // النتيجة بالضبط
+  const as = Math.sign(ah - aa), ps = Math.sign(ph - pa);
+  if (as !== ps) return 0;                                // اتجاه خاطئ
+  if (ah - aa === ph - pa) return cfg.diff;               // الاتجاه + الفارق صحيح
+  return cfg.outcome;                                     // الاتجاه فقط
+}
+
+// جدول ترتيب المتوقّعين — يجمع النقاط عبر المباريات المنتهية لكل مشارك
+export function computePredictionStandings(predictors, predictions, matches, comp) {
+  const cfg = compScoring(comp);
+  const matchById = new Map(matches.map((m) => [m.id, m]));
+  const rows = new Map();
+  for (const p of predictors) rows.set(p.uid, { predictor: p, points: 0, exact: 0, hits: 0, scored: 0, predicted: 0 });
+  for (const pred of predictions) {
+    const row = rows.get(pred.uid);
+    if (!row) continue;                                   // توقّع بلا تسجيل — نتجاهله
+    const m = matchById.get(pred.match_id);
+    if (!m) continue;
+    row.predicted++;
+    const pts = predictionPoints(pred, m, cfg);
+    if (pts == null) continue;                            // المباراة لم تنتهِ
+    row.scored++;
+    row.points += pts;
+    if (pts > 0) row.hits++;
+    if (m.home_score === pred.home && m.away_score === pred.away) row.exact++;
+  }
+  const list = [...rows.values()];
+  list.sort((a, b) =>
+    b.points - a.points || b.exact - a.exact || b.hits - a.hits ||
+    String(a.predictor.name || "").localeCompare(String(b.predictor.name || ""), "ar"));
+  return list.map((r, i) => ({ ...r, rank: i + 1 }));
 }

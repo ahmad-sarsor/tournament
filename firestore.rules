@@ -65,6 +65,14 @@ service cloud.firestore {
     function parentManages(tid) { return tExists(tid) && canManageT(tData(tid)); }
     function parentScores(tid)  { return tExists(tid) && canScoreT(tData(tid)); }
 
+    // مسابقة التوقّعات: صلاحية الإدارة مشتقّة من التورنير الأب
+    function pcomp(cid)       { return get(/databases/$(database)/documents/pcomps/$(cid)).data; }
+    function pcompExists(cid) { return cid is string && exists(/databases/$(database)/documents/pcomps/$(cid)); }
+    function matchDoc(mid)    { return get(/databases/$(database)/documents/matches/$(mid)).data; }
+    function matchExists(mid) { return mid is string && exists(/databases/$(database)/documents/matches/$(mid)); }
+    // مالك الطلب (مجهول أو حقيقي) — المتوقّعون يسجّلون مجهولين
+    function isSelf(id) { return request.auth != null && request.auth.uid == id; }
+
     // المفاتيح التي مسّها التعديل الحالي (للـ update فقط)
     function changedKeys() {
       return request.resource.data.diff(resource.data).affectedKeys();
@@ -189,7 +197,7 @@ service cloud.firestore {
     function matchKeys() {
       return ['tournament_id', 'group_id', 'round', 'home_team_id', 'away_team_id',
               'match_date', 'match_time', 'status', 'home_score', 'away_score',
-              'sort_order', 'live_started_at', 'stage', 'bracket_pos'];
+              'sort_order', 'live_started_at', 'stage', 'bracket_pos', 'locks_at'];
     }
     function matchValuesOk(d) {
       return (!('status' in d) || d.status in ['scheduled', 'live', 'finished'])
@@ -202,7 +210,8 @@ service cloud.firestore {
         && okOptNum(d, 'sort_order')
         && (!('stage' in d) || d.stage in ['group', 'knockout'])
         && okOptInt(d, 'bracket_pos', 0, 999)
-        && (!('live_started_at' in d) || d.live_started_at == null || d.live_started_at is number);
+        && (!('live_started_at' in d) || d.live_started_at == null || d.live_started_at is number)
+        && (!('locks_at' in d) || d.locks_at == null || d.locks_at is number);
     }
     // ما يُسمح لمسجِّل النتائج بتغييره في المباراة
     function scorerMatchKeys() { return ['home_score', 'away_score', 'status', 'live_started_at']; }
@@ -218,7 +227,7 @@ service cloud.firestore {
           (parentManages(resource.data.tournament_id)
             && changedKeys().hasOnly(['group_id', 'round', 'home_team_id', 'away_team_id',
                  'match_date', 'match_time', 'status', 'home_score', 'away_score',
-                 'sort_order', 'live_started_at', 'stage', 'bracket_pos']))
+                 'sort_order', 'live_started_at', 'stage', 'bracket_pos', 'locks_at']))
           ||
           (parentScores(resource.data.tournament_id)
             && changedKeys().hasOnly(scorerMatchKeys()))
@@ -289,6 +298,120 @@ service cloud.firestore {
         && request.resource.data.get('email', '') == addr
         && request.resource.data.get('added_at', 0) is number;
       allow delete: if isOwner();
+    }
+
+    // ---- مسابقة التوقّعات: المسابقات (pcomps) -------------------------------
+    function pcompKeys() {
+      return ['tournament_id', 'title', 'description', 'status', 'owner_email',
+              'pts_exact', 'pts_diff', 'pts_outcome', 'winners_count', 'prizes',
+              'created_at', 'sort_order'];
+    }
+    function pcompValuesOk(d) {
+      return okStr(d.get('title', ''), 120)
+        && okOptStr(d, 'description', 1000)
+        && (!('status' in d) || d.status in ['draft', 'open', 'closed', 'finished'])
+        && okOptInt(d, 'pts_exact', 0, 1000)
+        && okOptInt(d, 'pts_diff', 0, 1000)
+        && okOptInt(d, 'pts_outcome', 0, 1000)
+        && okOptInt(d, 'winners_count', 0, 100)
+        && (!('prizes' in d) || (d.prizes is list && d.prizes.size() <= 100))
+        && (!('owner_email' in d) || okStr(d.owner_email, 254))
+        && okOptNum(d, 'sort_order') && okOptNum(d, 'created_at');
+    }
+    match /pcomps/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(pcompKeys())
+        && pcompValuesOk(request.resource.data)
+        && request.resource.data.tournament_id is string
+        && parentManages(request.resource.data.tournament_id)
+        && request.resource.data.get('owner_email', '') == uemail();
+      allow update: if parentManages(resource.data.tournament_id)
+        && request.resource.data.keys().hasOnly(pcompKeys())
+        && pcompValuesOk(request.resource.data)
+        && request.resource.data.tournament_id == resource.data.tournament_id;
+      allow delete: if parentManages(resource.data.tournament_id);
+    }
+
+    // ---- المتوقّعون: اسم عامّ (للترتيب) — أي مستخدم (ولو مجهول) يسجّل نفسه ------
+    function predictorValuesOk(d) {
+      return okStr(d.get('name', ''), 60)
+        && d.get('competition_id', '') is string
+        && d.get('tournament_id', '') is string
+        && d.get('uid', '') is string
+        && okOptNum(d, 'created_at');
+    }
+    // التسجيل متاح فقط والمسابقة «مفتوحة»، وضمن نفس التورنير
+    function joinOpen(cid, tid) {
+      return pcompExists(cid) && pcomp(cid).status == 'open' && pcomp(cid).tournament_id == tid;
+    }
+    match /predictors/{id} {
+      allow read: if true;
+      allow create: if isSelf(request.resource.data.uid)
+        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'name', 'created_at'])
+        && predictorValuesOk(request.resource.data)
+        && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
+      allow update: if isSelf(resource.data.uid)
+        && changedKeys().hasOnly(['name'])
+        && okStr(request.resource.data.get('name', ''), 60);
+      allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
+    }
+
+    // ---- تواصل المتوقّع (هاتف/بريد/عمر) — خاصّ: يقرؤه صاحبه أو منظّم التورنير ----
+    function contactValuesOk(d) {
+      return d.get('competition_id', '') is string
+        && d.get('tournament_id', '') is string
+        && d.get('uid', '') is string
+        && ((d.get('phone', null) is string && d.get('phone', '').size() >= 3)
+            || (d.get('email', null) is string && d.get('email', '').size() >= 3))
+        && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() <= 40))
+        && (!('email' in d) || d.email == null || (d.email is string && d.email.size() <= 120))
+        && (!('age' in d) || d.age == null || (d.age is int && d.age >= 3 && d.age <= 120))
+        && okOptNum(d, 'created_at');
+    }
+    match /predictorContacts/{id} {
+      allow read: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
+      allow create: if isSelf(request.resource.data.uid)
+        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'phone', 'email', 'age', 'created_at'])
+        && contactValuesOk(request.resource.data)
+        && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
+      allow update: if isSelf(resource.data.uid)
+        && changedKeys().hasOnly(['phone', 'email', 'age'])
+        && contactValuesOk(request.resource.data);
+      allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
+    }
+
+    // ---- التوقّعات — يكتبها صاحبها فقط، وتُقفل فور بدء المباراة ----------------
+    function predictionValuesOk(d) {
+      return d.get('competition_id', '') is string
+        && d.get('tournament_id', '') is string
+        && d.get('match_id', '') is string
+        && d.get('uid', '') is string
+        && d.get('home', -1) is int && d.get('home', -1) >= 0 && d.get('home', -1) <= 99
+        && d.get('away', -1) is int && d.get('away', -1) >= 0 && d.get('away', -1) <= 99
+        && okOptNum(d, 'created_at');
+    }
+    // يُسمح بالتوقّع إن قبلت المسابقة الإدخال، والمباراة لم تبدأ (status) ولم يحلّ موعدها (locks_at)
+    function predEntryAllowed(d) {
+      return pcompExists(d.competition_id)
+        && pcomp(d.competition_id).status in ['open', 'closed']
+        && pcomp(d.competition_id).tournament_id == d.tournament_id
+        && matchExists(d.match_id)
+        && matchDoc(d.match_id).status == 'scheduled'
+        && matchDoc(d.match_id).tournament_id == d.tournament_id
+        && (matchDoc(d.match_id).get('locks_at', null) == null
+            || request.time.toMillis() < matchDoc(d.match_id).get('locks_at', 0));
+    }
+    match /predictions/{id} {
+      allow read: if true;
+      allow create: if isSelf(request.resource.data.uid)
+        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'match_id', 'uid', 'home', 'away', 'created_at'])
+        && predictionValuesOk(request.resource.data)
+        && predEntryAllowed(request.resource.data);
+      allow update: if isSelf(resource.data.uid)
+        && changedKeys().hasOnly(['home', 'away', 'created_at'])
+        && predictionValuesOk(request.resource.data)
+        && predEntryAllowed(request.resource.data);
+      allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
     }
 
     // أي مجموعة أخرى: ممنوعة افتراضياً

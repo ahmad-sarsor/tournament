@@ -4,12 +4,15 @@
 import { isConfigured } from "./firebase.js";
 import { SITE_NAME } from "./config.js";
 import { t, statusLabel, matchStatusLabel, formatDate, formatTime, weekdayName } from "./i18n.js";
-import { el, mount, clear, spinner, emptyState, toast } from "./util.js";
+import { el, mount, clear, spinner, emptyState, toast, openModal } from "./util.js";
 import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
   getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail,
+  fetchCompetitionsByTournament, fetchPredictors, fetchPredictions, fetchMyPredictor, fetchMyPredictions,
+  fetchMyContact, registerPredictor, updateMyPredictor, savePrediction,
+  computePredictionStandings, compScoring, isPredictable, predictionPoints, currentUid,
 } from "./data.js";
-import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket } from "./render.js";
+import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket, predictionBoard } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
@@ -23,7 +26,9 @@ let session = null;
 const authLink = document.querySelector(".header-auth");
 function renderAuthLink() {
   if (!authLink) return;
-  if (session) { authLink.textContent = "لوحتي"; authLink.setAttribute("href", "./admin.html"); }
+  // المستخدم المجهول (متوقّع في مسابقة) ليس «دخولاً» للوحة المنظّم
+  const real = session?.user && !session.user.isAnonymous;
+  if (real) { authLink.textContent = "لوحتي"; authLink.setAttribute("href", "./admin.html"); }
   else { authLink.textContent = "دخول / تسجيل"; authLink.setAttribute("href", "./admin.html#/register"); }
 }
 getSession().then((s) => { session = s; renderAuthLink(); }).catch(() => {});
@@ -31,12 +36,16 @@ onAuthChange((s) => { session = s; renderAuthLink(); });
 
 document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({
   isAdmin: false,
-  session,
+  session: (session?.user && !session.user.isAnonymous) ? session : null,   // المجهول ليس جلسة منظّم
   onSignOut: async () => { try { await signOut(); } catch {} location.reload(); },
 }));
 
 let currentUnsub = null;              // إلغاء اشتراك التحديث اللحظي الحالي
-function cleanup() { if (currentUnsub) { currentUnsub(); currentUnsub = null; } }
+let predLockTimer = null;             // مؤقّت قفل التوقّعات عند أقرب موعد مباراة
+function cleanup() {
+  if (currentUnsub) { currentUnsub(); currentUnsub = null; }
+  if (predLockTimer) { clearTimeout(predLockTimer); predLockTimer = null; }
+}
 
 // تمرير تلقائي لبرنامج المباريات عند فتح التبويب فقط (لا مع التحديث اللحظي)
 let scheduleAnchorPending = false;
@@ -148,6 +157,7 @@ async function renderTournament(id, tab) {
 
   const state = { tournament, bundle: await fetchTournamentBundle(id), tab };
   state.mgrCtx = await managerContext();   // لإظهار زر «إدارة البطولة» للمخوَّلين
+  state.comps = await fetchCompetitionsByTournament(id).catch(() => []);  // مسابقات التوقّعات
   scheduleAnchorPending = true;         // فتح جديد للصفحة ← اسمح بالتمرير التلقائي في البرنامج
   renderTournamentShell(state);
 
@@ -167,12 +177,15 @@ async function renderTournament(id, tab) {
 function renderTournamentShell(state) {
   const { tournament } = state;
   const hasKnockout = (state.bundle.matches || []).some((m) => m.stage === "knockout");
+  // تبويب التوقّعات يظهر فقط عند وجود مسابقة منشورة (غير مسودّة)
+  const hasPredictions = (state.comps || []).some((c) => c.status && c.status !== "draft");
   const tabs = el("div.tabs", { role: "tablist" }, [
     tabBtn(t.schedule, tournament.id, "schedule", state.tab),
     tabBtn(t.standings, tournament.id, "standings", state.tab),
     hasKnockout ? tabBtn(t.knockout, tournament.id, "knockout", state.tab) : null,
     tabBtn(t.teamsTab, tournament.id, "teams", state.tab),
     tabBtn(t.statsTab, tournament.id, "stats", state.tab),
+    hasPredictions ? tabBtn("🎯 " + t.predictions, tournament.id, "predictions", state.tab) : null,
   ]);
   const content = el("div", { id: "tab-content" });
   mount(app,
@@ -226,6 +239,7 @@ function renderTabContent(state) {
   else if (state.tab === "knockout") host.appendChild(renderKnockout(state));
   else if (state.tab === "teams") host.appendChild(renderTeams(state));
   else if (state.tab === "stats") host.appendChild(renderStats(state));
+  else if (state.tab === "predictions") host.appendChild(renderPredictions(state));
   else host.appendChild(renderSchedule(state));
 }
 
@@ -396,6 +410,277 @@ function renderStats(state) {
 
   rerender();
   return wrap;
+}
+
+// ---- تبويب التوقّعات (مسابقة التوقّعات) -------------------------------------
+
+function compStatusBadge(status) {
+  const cls = { open: "badge-active", closed: "badge-upcoming", finished: "badge-finished" }[status] || "badge-upcoming";
+  return el("span.badge." + cls, { text: t["pc_status_" + status] || status });
+}
+
+function renderPredictions(state) {
+  const root = el("div");
+  const comps = (state.comps || []).filter((c) => c.status && c.status !== "draft");
+  if (!comps.length) { root.appendChild(emptyState("🎯", t.noCompetitionPublic)); return root; }
+  state.predCache ||= new Map();
+  if (!comps.some((c) => c.id === state.activeCompId)) state.activeCompId = comps[0].id;
+
+  // show(refetch): يبني التبويب. يعيد الجلب فقط عند الطلب (تحديث/انضمام جديد لمسابقة غير محمّلة)
+  const show = async (refetch) => {
+    const comp = comps.find((c) => c.id === state.activeCompId) || comps[0];
+    if (refetch) state.predCache.delete(comp.id);
+    if (!state.predCache.has(comp.id)) {
+      mount(root, spinner());
+      try {
+        const uid = currentUid();
+        const [predictors, predictions, myPredictor] = await Promise.all([
+          fetchPredictors(comp.id), fetchPredictions(comp.id),
+          uid ? fetchMyPredictor(comp.id, uid) : Promise.resolve(null),
+        ]);
+        const myPredictions = (myPredictor && uid) ? await fetchMyPredictions(comp.id, uid) : [];
+        state.predCache.set(comp.id, { predictors, predictions, myPredictor, myPredictions });
+      } catch (e) { console.error(e); return mount(root, el("div.alert.alert-error", { text: t.errorGeneric })); }
+    }
+    renderCompView(root, state, comp, comps, state.predCache.get(comp.id), show);
+  };
+  show(false);
+  return root;
+}
+
+function renderCompView(root, state, comp, comps, cache, show) {
+  const teamById = new Map(state.bundle.teams.map((x) => [x.id, x]));
+  const uid = currentUid();
+  const registered = !!cache.myPredictor;
+  const acceptsEntries = comp.status === "open" || comp.status === "closed";
+  const standings = computePredictionStandings(cache.predictors, cache.predictions, state.bundle.matches, comp);
+  const blocks = [];
+
+  // اختيار المسابقة عند تعدّدها
+  if (comps.length > 1) {
+    blocks.push(el("div.filter-selects", {}, [
+      el("select.input.filter-select", {
+        "aria-label": t.predictionComp,
+        onchange: (e) => { state.activeCompId = e.currentTarget.value; show(false); },
+      }, comps.map((c) => {
+        const o = el("option", { value: c.id, text: c.title || t.predictionComp });
+        if (c.id === comp.id) o.selected = true;
+        return o;
+      })),
+    ]));
+  }
+
+  blocks.push(el("div.pc-head", {}, [
+    el("div", { style: "display:flex;align-items:center;gap:10px;flex-wrap:wrap" }, [
+      el("h2.pc-title", { text: comp.title || t.predictionComp }),
+      compStatusBadge(comp.status),
+    ]),
+    comp.description ? el("p.page-sub", { style: "margin-top:6px", text: comp.description }) : null,
+  ]));
+
+  // بطاقة حالتي / الانضمام
+  if (registered) {
+    blocks.push(el("div.card.card-pad.pc-mine", {}, [
+      el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap" }, [
+        el("div", {}, [
+          el("span.pc-badge-in", { text: "✓ " + t.youAreIn }),
+          el("div", { style: "font-weight:800;margin-top:3px", text: cache.myPredictor.name || "" }),
+        ]),
+        el("button.btn.btn-sm.btn-outline", { text: "✎ " + t.editMyInfo, onclick: () => openRegisterModal(comp, cache, show, true) }),
+      ]),
+    ]));
+  } else if (comp.status === "open") {
+    blocks.push(el("div.card.card-pad", { style: "text-align:center" }, [
+      el("p", { style: "margin:0 0 12px;color:var(--text-2)", text: t.registerIntro }),
+      el("button.btn.btn-primary", { text: "🎯 " + t.joinCompetition, onclick: () => openRegisterModal(comp, cache, show, false) }),
+    ]));
+  } else {
+    blocks.push(el("div.alert.alert-warn", { text: t.registrationClosed }));
+  }
+
+  // توقّعاتي
+  if (registered) {
+    const myMap = new Map((cache.myPredictions || []).map((p) => [p.match_id, p]));
+    const matches = state.bundle.matches.filter((m) => m.home_team_id && m.away_team_id);
+    const section = el("div.pc-matches");
+    if (!matches.length) section.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noMatchesToPredict }));
+    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), cache, show, acceptsEntries));
+    blocks.push(el("div.pc-section", {}, [
+      el("h3.mp-title", { text: "🎲 " + t.myPredictions }),
+      el("p.set-hint", { style: "margin:0 0 10px", text: t.predLockHint }),
+      section,
+    ]));
+  }
+
+  // طريقة الاحتساب + الجوائز
+  const cards2 = [scoringCard(comp), prizesCard(comp)].filter(Boolean);
+  if (cards2.length) blocks.push(el("div.pc-cards2", {}, cards2));
+
+  // جدول الترتيب
+  blocks.push(el("div.pc-section", {}, [
+    el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px" }, [
+      el("h3.mp-title", { style: "margin:0", text: "🏅 " + t.predLeaderboard }),
+      el("button.btn.btn-sm.btn-outline", { text: "↻ " + t.refreshBoard, onclick: () => show(true) }),
+    ]),
+    predictionBoard(standings, comp, { myUid: uid }),
+  ]));
+
+  mount(root, ...blocks);
+
+  // إعادة رسم تلقائية عند أقرب موعد قفل، كي تُقفل الصفوف حتى بلا تحديث حيّ
+  if (predLockTimer) { clearTimeout(predLockTimer); predLockTimer = null; }
+  if (registered && acceptsEntries) {
+    const now = Date.now();
+    const nextLock = state.bundle.matches.reduce((min, m) =>
+      (m.status === "scheduled" && m.home_team_id && m.away_team_id && m.locks_at != null && m.locks_at > now)
+        ? Math.min(min, m.locks_at) : min, Infinity);
+    if (nextLock !== Infinity) {
+      const delay = Math.min(nextLock - now + 500, 6 * 60 * 60 * 1000);   // هامش نصف ثانية، بحدّ 6 ساعات
+      predLockTimer = setTimeout(() => show(false), Math.max(1000, delay));
+    }
+  }
+}
+
+function scoringCard(comp) {
+  const s = compScoring(comp);
+  const row = (label, pts) => el("div.pc-score-row", {}, [
+    el("span.pc-score-lbl", { text: label }),
+    el("span.pc-score-pts", { text: pts + " " + t.ptsSuffix }),
+  ]);
+  return el("div.card.card-pad", {}, [
+    el("div.pc-card-title", { text: "🧮 " + t.scoringTitle }),
+    row("🎯 " + t.scoringExact, s.exact),
+    row("↔️ " + t.scoringDiff, s.diff),
+    row("✔️ " + t.scoringOutcome, s.outcome),
+    row("✗ " + t.scoringMiss, 0),
+  ]);
+}
+
+function prizesCard(comp) {
+  const winners = comp.winners_count ?? 0;
+  const prizes = Array.isArray(comp.prizes) ? comp.prizes : [];
+  const n = Math.max(winners, prizes.length);
+  if (!n) return null;
+  const medal = (r) => ({ 1: "🥇", 2: "🥈", 3: "🥉" }[r] || "#" + r);
+  const rows = [];
+  for (let r = 1; r <= n; r++) rows.push(el("div.pc-prize-row", {}, [
+    el("span.pc-prize-rank", { text: medal(r) }),
+    el("span.pc-prize-txt", { text: prizes[r - 1] || "—" }),
+  ]));
+  return el("div.card.card-pad", {}, [el("div.pc-card-title", { text: "🎁 " + t.prizesTitle }), ...rows]);
+}
+
+// صفّ مباراة واحدة داخل «توقّعاتي»: قابل للإدخال إن كانت مجدولة، وإلا مقفل مع النتيجة والنقاط
+function predictionMatchRow(comp, m, teamById, myPred, cache, show, acceptsEntries) {
+  const home = teamById.get(m.home_team_id)?.name || "—";
+  const away = teamById.get(m.away_team_id)?.name || "—";
+  const editable = acceptsEntries && isPredictable(m);
+  const nameH = el("span.pc-row-team", { text: home });
+  const nameA = el("span.pc-row-team", { text: away });
+
+  if (editable) {
+    const inH = el("input.input.pc-num", { type: "number", inputmode: "numeric", min: 0, max: 99, value: myPred?.home ?? "" });
+    const inA = el("input.input.pc-num", { type: "number", inputmode: "numeric", min: 0, max: 99, value: myPred?.away ?? "" });
+    const saveBtn = el("button.btn.btn-sm.btn-primary.pc-save", { type: "button", text: "💾", title: t.savePrediction });
+    saveBtn.addEventListener("click", async () => {
+      if (inH.value === "" || inA.value === "") return toast(t.yourGuess + "؟", "err");
+      const hi = parseInt(inH.value, 10), ai = parseInt(inA.value, 10);
+      if (!(hi >= 0 && hi <= 99 && ai >= 0 && ai <= 99)) return toast(t.errorGeneric, "err");
+      saveBtn.disabled = true;
+      try {
+        const saved = await savePrediction(comp, m, hi, ai);
+        cache.myPredictions = (cache.myPredictions || []).filter((p) => p.match_id !== m.id);
+        cache.myPredictions.push(saved);
+        // نُبقي كاش الترتيب متّسقاً (المعرّف ثابت لكل مباراة/متوقّع)
+        cache.predictions = (cache.predictions || []).filter((p) => p.id !== saved.id);
+        cache.predictions.push(saved);
+        toast(t.predictionSaved, "ok");
+        show(false);
+      } catch (e) { saveBtn.disabled = false; toast(e.message || t.errorGeneric, "err"); }
+    });
+    return el("div.pc-row", {}, [nameH, el("div.pc-row-mid", {}, [inH, el("span.pc-colon", { text: ":" }), inA]), nameA, saveBtn]);
+  }
+
+  // مقفلة (بدأت المباراة أو حلّ موعدها)
+  const finished = isCounted(m);
+  const scheduledLocked = m.status === "scheduled";   // حان الموعد لكن لم تبدأ بعد
+  const pts = (myPred && finished) ? predictionPoints(myPred, m, compScoring(comp)) : null;
+  const resultTxt = (m.home_score != null && m.away_score != null)
+    ? `${m.home_score} : ${m.away_score}`
+    : (m.status === "live" ? t.live : (m.match_time ? formatTime(m.match_time) : "🔒"));
+  const guess = myPred ? `${myPred.home}:${myPred.away}` : t.notPredicted;
+  return el("div.pc-row.pc-row-locked", {}, [
+    nameH,
+    el("div.pc-row-mid", {}, [el("span.pc-result" + (m.status === "live" ? ".is-live" : ""), { text: resultTxt })]),
+    nameA,
+    el("div.pc-row-meta", {}, [
+      scheduledLocked ? el("span.pc-lock-note", { text: "🔒 " + t.predDeadlinePassed }) : null,
+      el("span.pc-guess", { text: t.yourGuess + ": " + guess }),
+      pts != null ? el("span.pc-pts" + (pts > 0 ? ".pos" : ""), { text: "+" + pts }) : null,
+    ]),
+  ]);
+}
+
+// نموذج التسجيل/تعديل البيانات (اسم ثلاثي + هاتف/بريد + عمر)
+function openRegisterModal(comp, cache, show, isEdit) {
+  const nameI = el("input.input", { type: "text", maxlength: "60", placeholder: t.regNamePlaceholder, value: isEdit ? (cache.myPredictor?.name || "") : "" });
+  const phoneI = el("input.input", { type: "tel", maxlength: "40", placeholder: t.regPhonePlaceholder, style: "direction:ltr;text-align:end" });
+  const emailI = el("input.input", { type: "email", maxlength: "120", style: "direction:ltr;text-align:end" });
+  const ageI = el("input.input", { type: "number", min: "5", max: "120", inputmode: "numeric" });
+  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
+  const showErr = (msg) => { err.hidden = false; err.textContent = msg; };
+
+  // عند التعديل: نجلب بيانات التواصل الحالية لتعبئتها
+  if (isEdit) fetchMyContact(comp.id, currentUid()).then((c) => {
+    if (c) { phoneI.value = c.phone || ""; emailI.value = c.email || ""; ageI.value = c.age ?? ""; }
+  }).catch(() => {});
+
+  const submit = el("button.btn.btn-primary.btn-block", { type: "submit", text: isEdit ? t.save : t.regSubmit });
+  const form = el("form", {}, [
+    !isEdit ? el("p", { style: "margin:0 0 12px;color:var(--text-2);font-size:.9rem", text: t.registerIntro }) : null,
+    el("div.field", {}, [el("label", { text: t.regName }), nameI]),
+    el("div.field", {}, [el("label", { text: t.regPhone }), phoneI]),
+    el("div.field", {}, [el("label", { text: t.regEmail }), emailI, el("div.field-hint", { text: t.regContactHint })]),
+    el("div.field", {}, [el("label", { text: t.regAge }), ageI]),
+    err, submit,
+    el("button", { type: "submit", hidden: true }),
+  ]);
+  const close = openModal({ title: isEdit ? "✎ " + t.editMyInfo : "🎯 " + t.registerTitle, body: form });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true;
+    const name = nameI.value.trim();
+    const phone = phoneI.value.trim(), email = emailI.value.trim();
+    const ageRaw = ageI.value.trim();
+    if (name.split(/\s+/).filter(Boolean).length < 3) return showErr(t.regNameShort);
+    if (!phone && !email) return showErr(t.regContactRequired);
+    const age = ageRaw === "" ? null : parseInt(ageRaw, 10);
+    if (age != null && !(age >= 5 && age <= 120)) return showErr(t.regAgeInvalid);
+    submit.disabled = true; submit.textContent = t.loading;
+    try {
+      if (isEdit) {
+        await updateMyPredictor(comp, currentUid(), { name, phone, email, age });
+        if (cache.myPredictor) cache.myPredictor.name = name;
+        const inBoard = (cache.predictors || []).find((p) => p.uid === cache.myPredictor?.uid);
+        if (inBoard) inBoard.name = name;
+        toast(t.infoUpdated, "ok");
+      } else {
+        const r = await registerPredictor(comp, { name, phone, email, age });
+        cache.myPredictor = { uid: r.uid, name, competition_id: comp.id, tournament_id: comp.tournament_id };
+        cache.myPredictions = [];
+        // أضِفه إلى قائمة الترتيب فوراً (بصفر نقاط)
+        (cache.predictors ||= []).push({ uid: r.uid, name, competition_id: comp.id, tournament_id: comp.tournament_id });
+        toast(t.regDone, "ok");
+      }
+      close(); show(false);
+    } catch (e2) {
+      console.error(e2);
+      submit.disabled = false; submit.textContent = isEdit ? t.save : t.regSubmit;
+      // رسالة واضحة إن لم يُفعَّل الدخول المجهول في إعدادات Firebase
+      const anonOff = ["auth/operation-not-allowed", "auth/admin-restricted-operation", "auth/configuration-not-found"];
+      showErr(anonOff.includes(e2?.code) ? t.anonDisabled : (e2.message || t.errorGeneric));
+    }
+  });
 }
 
 // ---- تبويب الفرق (كل البيوت وفرقها) ---------------------------------------

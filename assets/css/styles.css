@@ -649,3 +649,56 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .bk-wrap { display: flex; flex-direction: column; gap: 4px; }
 .bk-edit-btn { padding: 4px 8px; font-size: .74rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); cursor: pointer; transition: .15s; }
 .bk-edit-btn:hover { color: var(--brand); border-color: var(--brand); }
+
+/* ---- مسابقة التوقّعات (Predictions) ---- */
+.pc-head { margin: 4px 0 16px; }
+.pc-title { font-size: 1.35rem; font-weight: 800; color: var(--ink); }
+.pc-section { margin-top: 22px; }
+.pc-mine { margin-bottom: 16px; }
+.pc-badge-in { display: inline-block; font-weight: 800; font-size: .8rem; color: var(--win); background: color-mix(in srgb, var(--win) 12%, transparent); padding: 3px 10px; border-radius: 999px; }
+
+/* بطاقتا الاحتساب + الجوائز جنباً إلى جنب */
+.pc-cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+.pc-card-title { font-weight: 800; font-size: 1rem; color: var(--ink); margin-bottom: 12px; }
+.pc-score-row, .pc-prize-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.pc-score-row:last-child, .pc-prize-row:last-child { border-bottom: 0; }
+.pc-score-lbl { color: var(--text-2); font-size: .9rem; }
+.pc-score-pts { font-weight: 800; color: var(--brand); white-space: nowrap; }
+.pc-prize-rank { font-size: 1.1rem; min-width: 30px; }
+.pc-prize-txt { flex: 1; text-align: start; font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
+
+/* صفوف التوقّع */
+.pc-matches { display: flex; flex-direction: column; gap: 8px; }
+.pc-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-xs); }
+.pc-row-team { font-weight: 700; font-size: .88rem; color: var(--ink); overflow-wrap: anywhere; }
+.pc-row-team:first-child { text-align: start; }
+.pc-row > .pc-row-team:nth-child(3) { text-align: end; }
+.pc-row-mid { display: flex; align-items: center; gap: 4px; justify-content: center; }
+.pc-colon { font-weight: 800; color: var(--text-3); }
+.pc-num { width: 46px; text-align: center; padding: 8px 4px; -moz-appearance: textfield; }
+.pc-num::-webkit-outer-spin-button, .pc-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.pc-save { min-width: 40px; }
+.pc-result { font-weight: 900; font-size: 1rem; color: var(--ink); }
+.pc-result.is-live { color: var(--live); }
+.pc-row-locked { background: var(--surface-2); }
+.pc-row-meta { display: flex; align-items: center; gap: 8px; justify-content: flex-end; grid-column: 1 / -1; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 2px; }
+.pc-guess { font-size: .8rem; color: var(--text-2); }
+.pc-lock-note { font-size: .78rem; color: var(--text-3); font-weight: 600; }
+.pc-pts { font-weight: 800; font-size: .82rem; color: var(--text-3); background: var(--surface-3); padding: 2px 8px; border-radius: 999px; }
+.pc-pts.pos { color: var(--win); background: color-mix(in srgb, var(--win) 13%, transparent); }
+
+/* شارات جدول ترتيب المتوقّعين */
+.prize-chip { display: inline-block; margin-inline-start: 8px; font-size: .72rem; font-weight: 700; color: #b45309; background: color-mix(in srgb, var(--gold) 15%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+.me-chip { display: inline-block; margin-inline-start: 8px; font-size: .72rem; font-weight: 700; color: var(--brand); background: var(--brand-soft); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+table.standings tbody tr.is-me td { background: color-mix(in srgb, var(--brand) 10%, transparent); }
+table.standings tbody tr.is-me td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+
+/* شبكة نقاط الاحتساب في نموذج الإدارة */
+.pc-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.pc-grid3 .field { margin-bottom: 0; }
+
+@media (max-width: 560px) {
+  .pc-cards2 { grid-template-columns: 1fr; }
+  .pc-row-team { font-size: .82rem; }
+  .pc-num { width: 40px; }
+}
