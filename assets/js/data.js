@@ -123,8 +123,9 @@ export function computeGroupStandings(teams, matches, points) {
     rows.set(tm.id, { team: tm, played: 0, won: 0, drawn: 0, lost: 0, gf: 0, ga: 0, gd: 0, points: 0 });
   }
 
+  // مباريات خروج المغلوب لا تُحتسب في ترتيب البيوت (قد يكون طرفاها من البيت نفسه فتُفسِد الجدول)
   const counted = matches.filter(
-    (m) => isCounted(m) && rows.has(m.home_team_id) && rows.has(m.away_team_id)
+    (m) => isCounted(m) && m.stage !== "knockout" && rows.has(m.home_team_id) && rows.has(m.away_team_id)
   );
 
   for (const m of counted) {
@@ -399,6 +400,9 @@ export async function updateTournament(id, patch) {
   return { id, ...patch };
 }
 export async function deleteTournament(id) {
+  // احذف مسابقات التوقّعات وكل بياناتها الشخصيّة أوّلًا (توقّعات/متوقّعين/بيانات تواصل) وإلّا بقيت يتيمة للأبد
+  const comps = await fetchCompetitionsByTournament(id);
+  for (const c of comps) await deleteCompetition(c.id);
   await deleteWhere("events", "tournament_id", id);
   await deleteWhere("players", "tournament_id", id);
   await deleteWhere("matches", "tournament_id", id);
@@ -621,15 +625,47 @@ export function bracketSeedOrder(n) {
 export function computeQualifiers(tournament, groups, teams, matches) {
   const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
   const perGroup = Math.max(1, tournament.qualifiers_per_group ?? 2);
-  const ranked = [];
+
+  // متأهّلو كل بيت مرتّبين حسب المرتبة (رتبة 0 = بطل البيت، 1 = وصيف…)
+  const tiers = []; // tiers[rank] = [{ team, gi }]
   groups.forEach((g, gi) => {
     const gTeams = teams.filter((tm) => tm.group_id === g.id);
     computeGroupStandings(gTeams, matches, points).slice(0, perGroup)
-      .forEach((row, rank) => ranked.push({ team: row.team, gi, rank }));
+      .forEach((row, rank) => { (tiers[rank] = tiers[rank] || []).push({ team: row.team, gi }); });
   });
-  // الأوائل أولاً ثم الثواني… ومع كل مرتبة نعكس ترتيب البيوت للتباعد
-  ranked.sort((a, b) => a.rank - b.rank || (a.rank % 2 === 0 ? a.gi - b.gi : b.gi - a.gi));
-  return ranked.map((r) => r.team);
+  const flat = tiers.reduce((n, t) => n + t.length, 0);
+  if (flat < 2) return tiers.reduce((acc, t) => acc.concat(t.map((x) => x.team)), []);
+
+  // نبذر المتأهّلين بحيث يقع كلّ متأهّلي البيت الواحد في أنصاف الشجرة المتقابلة،
+  // فلا يلتقي فريقا البيت نفسه قبل النهائي. نصف كل مقعد يُحسب فعليًّا من ترتيب البذر.
+  let B = 2; while (B < flat) B *= 2;
+  const order = bracketSeedOrder(B);
+  const posOfSeed = [];
+  order.forEach((seed, i) => { posOfSeed[seed - 1] = i; });
+  const halfOf = (seed) => (posOfSeed[seed - 1] < B / 2 ? 0 : 1);
+
+  const seedTeam = []; // seedTeam[seed-1] = team (بترتيب البذور)
+  const prevHalf = {}; // آخر نصف وُضع فيه كل بيت
+  let seedBase = 0;
+  tiers.forEach((tier, rank) => {
+    if (rank === 0) {
+      // الأبطال على المقاعد الأولى بترتيب البيوت
+      tier.forEach((entry, k) => { const seed = seedBase + k + 1; seedTeam[seed - 1] = entry.team; prevHalf[entry.gi] = halfOf(seed); });
+    } else {
+      const top = [], bot = [];
+      for (let k = 0; k < tier.length; k++) { const seed = seedBase + k + 1; (halfOf(seed) === 0 ? top : bot).push(seed); }
+      const wantTop = [], wantBot = [];
+      tier.forEach((entry) => { ((1 - (prevHalf[entry.gi] ?? 0)) === 0 ? wantTop : wantBot).push(entry); });
+      const place = (list, primary, fallback) => list.forEach((entry) => {
+        const seed = primary.length ? primary.shift() : fallback.shift();
+        seedTeam[seed - 1] = entry.team; prevHalf[entry.gi] = halfOf(seed);
+      });
+      place(wantTop, top, bot);
+      place(wantBot, bot, top);
+    }
+    seedBase += tier.length;
+  });
+  return seedTeam;
 }
 
 // يحسب بنية الشجرة (بلا إنشاء): قائمة مباريات مرتّبة، كلٌّ {round, pos, home, away}
