@@ -313,24 +313,34 @@ service cloud.firestore {
         )
         || (isOwner()
           && changedKeys().hasOnly(['approved'])
-          && request.resource.data.approved is bool);
+          && request.resource.data.approved is bool)
+        || (isOwner()
+          && request.resource.data.keys().hasOnly(userKeys())
+          && changedKeys().hasOnly(['username'])
+          && userValuesOk(request.resource.data));
       allow delete: if isOwner();
     }
 
     match /usernames/{username} {
       allow read: if true;
-      allow create: if request.auth != null
-        && request.resource.data.keys().hasOnly(['uid', 'username', 'auth_email', 'email', 'created_at'])
-        && request.resource.data.uid == request.auth.uid
-        && request.resource.data.username == username
-        && username.matches('^[a-z]+(-[a-z]+)*$')
-        && username.size() >= 3
-        && username.size() <= 24
-        && request.resource.data.auth_email == request.auth.token.email.lower()
-        && (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string)
-        && okOptNum(request.resource.data, 'created_at')
-        && !exists(/databases/$(database)/documents/usernames/$(username));
-      allow update: if false;
+      function usernameReservationOk() {
+        return request.resource.data.keys().hasOnly(['uid', 'username', 'auth_email', 'email', 'created_at'])
+          && request.resource.data.uid is string
+          && request.resource.data.username == username
+          && username.matches('^[a-z]+(-[a-z]+)*$')
+          && username.size() >= 3
+          && username.size() <= 24
+          && request.resource.data.auth_email is string
+          && (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string)
+          && okOptNum(request.resource.data, 'created_at');
+      }
+      allow create: if usernameReservationOk()
+        && !exists(/databases/$(database)/documents/usernames/$(username))
+        && ((request.auth != null
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.auth_email == request.auth.token.email.lower())
+          || isOwner());
+      allow update: if isOwner() && usernameReservationOk();
       allow delete: if isOwner();
     }
 

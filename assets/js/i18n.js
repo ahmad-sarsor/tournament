@@ -93,6 +93,7 @@ export const t = {
   removeAdminRole: "إزالة مدير المنصّة",
   approveMember: "اعتماد كعضو",
   revokeMember: "إلغاء العضوية",
+  fixUsername: "تصحيح الاسم",
   approvedBadge: "معتمد",
   pendingApprovalBadge: "بانتظار الموافقة",
   noEmailAccount: "بلا بريد",

@@ -240,38 +240,63 @@ function usernameBaseFrom(...parts) {
   return base.slice(0, 18).replace(/^-+|-+$/g, "") || "user";
 }
 
-function uidLetters(uid, maxLen = 8) {
-  const digitWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
-  const token = String(uid || "").toLowerCase().replace(/[0-9]/g, d => digitWords[Number(d)])
-    .replace(/[^a-z]+/g, "");
-  return (token || "account").slice(0, maxLen);
+function usernameBaseCandidates(u, preferred, realEmail) {
+  return [
+    realEmail ? usernameBaseFrom(realEmail.split("@")[0]) : "",
+    usernameBaseFrom(preferred),
+    usernameBaseFrom(u?.displayName),
+    "user",
+  ].filter(Boolean);
 }
 
 async function reserveUsernameForUser(u, preferred, authEmail, realEmail) {
-  let base = normalizeUsername(preferred);
-  if (!usernameValid(base)) base = usernameBaseFrom(realEmail?.split("@")[0], u.displayName, u.uid.slice(0, 6));
-  for (let i = 0; i < 8; i++) {
-    const suffix = i === 0 ? "" : "-" + uidLetters(u.uid, Math.min(6, 3 + i));
-    const candidate = (base + suffix).slice(0, 24);
+  const bases = usernameBaseCandidates(u, preferred, realEmail);
+  for (const base of bases) {
+    const candidate = base.slice(0, 24).replace(/-+$/g, "");
     if (!usernameValid(candidate)) continue;
     const ref = doc(requireDb(), "usernames", candidate);
     const existing = await getDoc(ref).catch(() => null);
-    if (existing?.exists()) {
-      if (existing.data()?.uid === u.uid) return candidate;
-      continue;
+    if (!existing?.exists() || existing.data()?.uid === u.uid) {
+      await setDoc(ref, clean({
+        uid: u.uid, username: candidate, auth_email: authEmail,
+        email: realEmail || null, created_at: Date.now(),
+      }));
+      return candidate;
     }
-    await setDoc(ref, clean({
-      uid: u.uid, username: candidate, auth_email: authEmail,
-      email: realEmail || null, created_at: Date.now(),
-    }));
-    return candidate;
   }
-  const fallback = ("user-" + uidLetters(u.uid, 12)).slice(0, 24).replace(/-+$/g, "");
-  await setDoc(doc(requireDb(), "usernames", fallback), clean({
-    uid: u.uid, username: fallback, auth_email: authEmail,
+  const err = new Error("username exists");
+  err.code = "app/username-exists";
+  throw err;
+}
+
+function usernameFromEmail(email) {
+  const base = usernameBaseFrom(String(email || "").split("@")[0]);
+  return usernameValid(base) ? base : "";
+}
+
+export async function resetUserUsernameToEmail(user) {
+  const d = requireDb();
+  const uid = String(user?.id || "").trim();
+  const realEmail = String(user?.email || "").trim().toLowerCase();
+  const authEmail = String(user?.auth_email || realEmail).trim().toLowerCase();
+  const next = usernameFromEmail(realEmail);
+  if (!uid || !next) throw new Error("Missing user or email");
+  const existing = await getDoc(doc(d, "usernames", next)).catch(() => null);
+  if (existing?.exists() && existing.data()?.uid !== uid) {
+    const err = new Error("username exists");
+    err.code = "app/username-exists";
+    throw err;
+  }
+  const old = normalizeUsername(user?.username);
+  const b = writeBatch(d);
+  b.update(doc(d, "users", uid), { username: next });
+  b.set(doc(d, "usernames", next), clean({
+    uid, username: next, auth_email: authEmail,
     email: realEmail || null, created_at: Date.now(),
   }));
-  return fallback;
+  if (usernameValid(old) && old !== next) b.delete(doc(d, "usernames", old));
+  await b.commit();
+  return next;
 }
 
 async function resolveLoginIdentifier(identifier) {
