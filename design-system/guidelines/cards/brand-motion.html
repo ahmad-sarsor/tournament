@@ -1,0 +1,33 @@
+<!-- @dsCard group="Brand" viewport="700x180" name="الحركة" subtitle="نطّاطة وقصيرة — كبس، ارتفاع، نبض مباشر (حرّك المؤشر!)" -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+body { padding: 16px 22px; background: var(--bg); margin: 0; display: flex; gap: 14px; align-items: stretch; }
+.demo { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; }
+.demo .l { font-size: .66rem; color: var(--text-3); font-weight: 700; line-height: 1.5; }
+.mini-card { width: 90%; padding: 10px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-xs); transition: transform var(--dur-fast) var(--ease-pop), box-shadow var(--dur-fast); font-weight: 800; font-size: .8rem; cursor: pointer; }
+.mini-card:hover { transform: translateY(-4px) rotate(-.3deg); box-shadow: var(--shadow-md); }
+</style>
+</head>
+<body>
+<div class="demo">
+  <button class="btn btn-primary">اضغط مطوّلاً</button>
+  <div class="l">الكبس: translateY(3px)<br>والظل الصلب يختفي · 150ms</div>
+</div>
+<div class="demo">
+  <div class="mini-card">🏆 بطولة الأحياء</div>
+  <div class="l">التحويم: ارتفاع 4px + ميل -0.3deg<br>ease-pop (نطّاطة)</div>
+</div>
+<div class="demo">
+  <span class="badge badge-live"><span class="dot"></span>مباشر</span>
+  <div class="l">النبض: opacity 1 ↔ .55<br>كل 1.6 ثانية</div>
+</div>
+<div class="demo">
+  <div class="spinner" style="margin: 4px auto;"></div>
+  <div class="l">التحميل: حلقة تدور 0.7s<br>+ skeleton متموّج</div>
+</div>
+</body>
+</html>

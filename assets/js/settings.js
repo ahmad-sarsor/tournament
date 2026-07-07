@@ -29,7 +29,7 @@ function syncThemeColor() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark" ||
     (getTheme() === "auto" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute("content", dark ? "#0a0f1c" : "#2563eb");
+  if (meta) meta.setAttribute("content", dark ? "#0a1120" : "#2f6bff");
 }
 
 // دعم تثبيت التطبيق

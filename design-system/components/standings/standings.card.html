@@ -1,0 +1,42 @@
+<!-- @dsCard group="Components" viewport="700x430" name="الترتيب" subtitle="جدول ترتيب: متصدّر ذهبي، متأهّلون بالأزرق، دليل الأداء" -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body { margin: 0; padding: 16px 22px; background: var(--bg); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { StandingsTable, FormGuide } = window.DesignSystem_d76f5e;
+
+const rows = [
+  { rank: 1, name: "خزيمة", played: 4, won: 3, drawn: 1, lost: 0, gf: 9, ga: 3, points: 10, form: ["w", "w", "d", "w"] },
+  { rank: 2, name: "عثمان بن عفان", played: 4, won: 2, drawn: 1, lost: 1, gf: 6, ga: 4, points: 7, form: ["l", "w", "d", "w"] },
+  { rank: 3, name: "أسامة بن زيد", played: 4, won: 2, drawn: 0, lost: 2, gf: 5, ga: 5, points: 6, form: ["w", "l", "w", "l"] },
+  { rank: 4, name: "حذيفة بن اليمان", played: 4, won: 1, drawn: 1, lost: 2, gf: 4, ga: 7, points: 4, form: ["d", "l", "w", "l"] },
+  { rank: 5, name: "رافع الظاهري", played: 4, won: 0, drawn: 1, lost: 3, gf: 2, ga: 7, points: 1, form: ["l", "d", "l", "l"] },
+];
+
+function Demo() {
+  return (
+    <div>
+      <div className="standings-title">🛡️ البيت الأول</div>
+      <StandingsTable rows={rows} qualifiers={2} showExtra />
+      <div className="legend">
+        <span><span className="swatch" style={{ background: "var(--sun)" }}></span>المتصدّر</span>
+        <span><span className="swatch"></span>تأهُّل (أول 2)</span>
+        <span>السجل: <FormGuide results={["w", "d", "l"]} /></span>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

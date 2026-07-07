@@ -1,0 +1,20 @@
+<!-- @dsCard group="Colors" viewport="700x150" name="ألوان النتائج" subtitle="فوز / تعادل / خسارة / مباشر — لغة الملعب" -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<style>
+body { display: flex; gap: 10px; padding: 16px; background: var(--bg); margin: 0; }
+.sw { flex: 1; height: 116px; border-radius: var(--radius); display: flex; flex-direction: column; justify-content: space-between; padding: 12px; color: #fff; font-size: .7rem; font-weight: 700; line-height: 1.45; }
+.sw .big { font-family: var(--font-display); font-size: 1.3rem; line-height: 1; }
+.sw code { font-family: inherit; opacity: .8; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="sw" style="background: var(--win);"><span class="big">ف</span><span>win فوز<br><code>#17b45a</code></span></div>
+<div class="sw" style="background: var(--draw);"><span class="big">ت</span><span>draw تعادل<br><code>#64748b</code></span></div>
+<div class="sw" style="background: var(--loss);"><span class="big">خ</span><span>loss خسارة<br><code>#e8404a</code></span></div>
+<div class="sw" style="background: var(--live);"><span class="big">●</span><span>live مباشر<br><code>#ff4757</code></span></div>
+</body>
+</html>

@@ -1,0 +1,34 @@
+<!-- @dsCard group="Components" viewport="700x470" name="المباراة" subtitle="لوحة النتيجة المباشرة + صفوف المباريات بثلاث حالات" -->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body { margin: 0; padding: 16px 22px; background: var(--bg); }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { Scoreboard, MatchRow } = window.DesignSystem_d76f5e;
+
+function Demo() {
+  return (
+    <div>
+      <Scoreboard homeName="سعد بن معاذ" awayName="أسد الله" homeScore={2} awayScore={1} live minute={38} />
+      <div className="day-head" style={{ marginTop: "16px" }}>
+        <span>الأحد</span><span className="date">05/07/2026</span><span className="line"></span>
+      </div>
+      <MatchRow time="17:00" group="البيت الأول" homeName="عثمان بن عفان" awayName="حذيفة بن اليمان" homeScore={3} awayScore={1} status="finished" onClick={() => {}} />
+      <MatchRow time="18:00" group="البيت الثاني" homeName="القعقاع" awayName="عمر بن الخطاب" homeScore={2} awayScore={2} status="live" onClick={() => {}} />
+      <MatchRow time="19:00" group="البيت الثالث" homeName="أحفاد أبي ذر" awayName="عبدالله بن مسعود" />
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById("root")).render(<Demo />);
+</script>
+</body>
+</html>

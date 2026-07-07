@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>نسخة احتياطية — منصّة البطولات</title>
+<!-- Firebase (نسخة compat تعمل حتى بفتح الملف مباشرةً من الحاسوب) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+<!-- SheetJS لإنشاء ملف Excel -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root { --b:#2563eb; --g:#16a34a; --bg:#f6f8fb; --card:#fff; --ink:#0f172a; --sub:#5b6675; --bd:#e6ebf2; --ok:#16a34a; --err:#dc2626; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:"Segoe UI","Tajawal",system-ui,sans-serif; background:var(--bg); color:var(--ink); padding:24px; line-height:1.6; }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 6px; }
+  p.sub { color:var(--sub); margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:14px; padding:22px; box-shadow:0 1px 3px rgba(15,23,42,.06); }
+  .btns { display:flex; flex-wrap:wrap; gap:12px; }
+  button { font:inherit; font-weight:800; cursor:pointer; border:0; border-radius:10px; padding:14px 22px; color:#fff; transition:.12s; }
+  button.excel { background:var(--g); box-shadow:0 3px 0 #0f7a3d; }
+  button.json { background:var(--b); box-shadow:0 3px 0 #1e3a8a; }
+  button:hover { filter:brightness(1.05); }
+  button:active { transform:translateY(3px); box-shadow:none; }
+  button:disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
+  .status { margin-top:18px; font-size:.95rem; white-space:pre-wrap; }
+  .status .ok { color:var(--ok); font-weight:700; }
+  .status .err { color:var(--err); font-weight:700; }
+  .counts { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
+  .chip { background:#eff6ff; color:var(--b); border:1px solid #dbeafe; border-radius:999px; padding:5px 12px; font-size:.85rem; font-weight:700; }
+  .note { margin-top:18px; font-size:.85rem; color:var(--sub); background:#fff8ec; border:1px solid #fcd9a3; border-radius:10px; padding:12px 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🗄️ نسخة احتياطية كاملة — منصّة البطولات</h1>
+  <p class="sub">تُنزّل كل بياناتك من Firebase: <b>Excel</b> (ملخّص متعدّد الأوراق للقراءة) أو <b>JSON</b> (نسخة خام كاملة تصلح لإعادة الاستيراد لاحقاً).</p>
+  <div class="card">
+    <div class="btns">
+      <button id="goExcel" class="excel" type="button">⬇️ تنزيل Excel</button>
+      <button id="goJson" class="json" type="button">⬇️ تنزيل JSON</button>
+    </div>
+    <div class="counts" id="counts"></div>
+    <div class="status" id="status">اضغط أحد الزرّين لبدء التنزيل. لا حاجة لتسجيل دخول — كل بيانات البطولات عامّة القراءة.</div>
+    <div class="note">
+      ℹ️ <b>أرقام هواتف/أعمار المشاركين في مسابقة التوقّعات</b> خاصّة ولا تُقرأ إلا للمنظّم المسجَّل — صدّرها من لوحة المنظّم على الموقع المباشر عبر «👥 المشاركون ← ⬇ تصدير CSV». هذه الأداة تصدّر كل شيء آخر (بما فيها أسماء المتوقّعين ونقاطهم).
+    </div>
+  </div>
+</div>
+
+<script>
+// إعدادات مشروع Firebase (علنيّة وآمنة — الحماية عبر قواعد Firestore)
+var firebaseConfig = {
+  apiKey:            "AIzaSyBDq_sFXKJDVh_S34iVxW1ymotq3Ki1-uM",
+  authDomain:        "tournament-8cd0a.firebaseapp.com",
+  projectId:         "tournament-8cd0a",
+  storageBucket:     "tournament-8cd0a.firebasestorage.app",
+  messagingSenderId: "160237416206",
+  appId:             "1:160237416206:web:101e67423fd6430a42b15f",
+  measurementId:     "G-1QP0E5RKL1",
+};
+
+var statusEl = document.getElementById("status");
+var countsEl = document.getElementById("counts");
+var btnExcel = document.getElementById("goExcel");
+var btnJson = document.getElementById("goJson");
+function setStatus(msg, cls) { statusEl.innerHTML = cls ? '<span class="' + cls + '">' + msg + '</span>' : msg; }
+function pad(n){ return String(n).padStart(2,"0"); }
+function fmtTime(t){ if(!t) return ""; var p=String(t).split(":"); return pad(p[0]||"00")+":"+pad(p[1]||"00"); }
+function sign(x){ return x>0?1:(x<0?-1:0); }
+function stamp(){ var d=new Date(); return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+function downloadBlob(blob, fname){
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url; a.download = fname; a.style.display = "none";
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 0);
+}
+
+// جلب كل المجموعات مرّة واحدة (يُخزَّن مؤقّتاً لإعادة الاستخدام بين الزرّين)
+var dataCache = null;
+async function fetchAll() {
+  if (dataCache) return dataCache;
+  if (typeof firebase === "undefined") throw new Error("تعذّر تحميل Firebase — تأكّد من اتصال الإنترنت.");
+  if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+  var db = firebase.firestore();
+  async function all(name) {
+    var snap = await db.collection(name).get();
+    return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+  }
+  var res = await Promise.all([
+    all("tournaments"), all("groups"), all("teams"), all("matches"),
+    all("players"), all("events"), all("pcomps"), all("predictors"), all("predictions"),
+  ]);
+  dataCache = {
+    tournaments: res[0], groups: res[1], teams: res[2], matches: res[3],
+    players: res[4], events: res[5], pcomps: res[6], predictors: res[7], predictions: res[8],
+  };
+  return dataCache;
+}
+
+function showCounts(d) {
+  var counts = [
+    ["البطولات", d.tournaments.length], ["المباريات", d.matches.length], ["الفرق", d.teams.length],
+    ["اللاعبون", d.players.length], ["الأحداث", d.events.length],
+    ["المسابقات", d.pcomps.length], ["المتوقّعون", d.predictors.length], ["التوقّعات", d.predictions.length],
+  ];
+  countsEl.innerHTML = counts.map(function(c){ return '<span class="chip">'+c[0]+": "+c[1]+'</span>'; }).join("");
+}
+
+// ---- تصدير JSON (نسخة خام كاملة) ----
+function exportJson(d) {
+  var payload = {
+    exported_at: new Date().toISOString(),
+    project: firebaseConfig.projectId,
+    counts: {
+      tournaments: d.tournaments.length, groups: d.groups.length, teams: d.teams.length,
+      matches: d.matches.length, players: d.players.length, events: d.events.length,
+      pcomps: d.pcomps.length, predictors: d.predictors.length, predictions: d.predictions.length,
+    },
+    collections: d,
+  };
+  var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8" });
+  downloadBlob(blob, "نسخة-احتياطية-البطولات-" + stamp() + ".json");
+}
+
+// ---- تصدير Excel (ملخّص متعدّد الأوراق) ----
+function exportExcel(d) {
+  if (typeof XLSX === "undefined") throw new Error("تعذّر تحميل مكتبة Excel — تأكّد من اتصال الإنترنت ثم أعد المحاولة.");
+  var tournaments=d.tournaments, groups=d.groups, teams=d.teams, matches=d.matches,
+      players=d.players, events=d.events, pcomps=d.pcomps, predictors=d.predictors, predictions=d.predictions;
+
+  var tById={}, gById={}, tmById={}, plById={}, mById={}, cById={};
+  tournaments.forEach(function(x){ tById[x.id]=x; });
+  groups.forEach(function(x){ gById[x.id]=x; });
+  teams.forEach(function(x){ tmById[x.id]=x; });
+  players.forEach(function(x){ plById[x.id]=x; });
+  matches.forEach(function(x){ mById[x.id]=x; });
+  pcomps.forEach(function(x){ cById[x.id]=x; });
+  var tName=function(id){ return (tById[id]||{}).name||""; };
+  var gName=function(id){ return (gById[id]||{}).name||""; };
+  var teamName=function(id){ return (tmById[id]||{}).name||""; };
+  var plName=function(id){ return (plById[id]||{}).name||""; };
+
+  var wb = XLSX.utils.book_new();
+  function addSheet(name, rows) {
+    var ws = XLSX.utils.aoa_to_sheet(rows);
+    ws["!views"] = [{ RTL: true }];
+    XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+  }
+
+  addSheet("البطولات", [["الاسم","الحالة","من","إلى","نقاط فوز","نقاط تعادل","نقاط خسارة","متأهّلون/بيت","الوصف"]].concat(
+    tournaments.map(function(t){ return [t.name||"", t.status||"", t.start_date||"", t.end_date||"", t.win_points!=null?t.win_points:"", t.draw_points!=null?t.draw_points:"", t.loss_points!=null?t.loss_points:"", t.qualifiers_per_group!=null?t.qualifiers_per_group:"", t.description||""]; })
+  ));
+
+  var msorted = matches.slice().sort(function(a,b){
+    return (tName(a.tournament_id)).localeCompare(tName(b.tournament_id),"ar")
+      || String(a.match_date||"9999").localeCompare(String(b.match_date||"9999"))
+      || String(a.match_time||"99").localeCompare(String(b.match_time||"99"));
+  });
+  addSheet("المباريات", [["البطولة","البيت","المرحلة","الجولة","التاريخ","الوقت","المضيف","نتيجة المضيف","نتيجة الضيف","الضيف","الحالة"]].concat(
+    msorted.map(function(m){ return [ tName(m.tournament_id), gName(m.group_id), (m.stage==="knockout"?"خروج المغلوب":"دوري"), m.round!=null?m.round:"", m.match_date||"", fmtTime(m.match_time), teamName(m.home_team_id), m.home_score!=null?m.home_score:"", m.away_score!=null?m.away_score:"", teamName(m.away_team_id), (m.status==="finished"?"منتهية":m.status==="live"?"مباشر":"مجدولة") ]; })
+  ));
+
+  addSheet("الفرق", [["البطولة","البيت","الفريق"]].concat(
+    teams.map(function(t){ return [tName(t.tournament_id), gName(t.group_id), t.name||""]; })
+  ));
+
+  var roleAr = { player:"لاعب", coach:"مدرب", management:"إداري" };
+  addSheet("اللاعبون", [["البطولة","الفريق","الاسم","الرقم","الصفة"]].concat(
+    players.map(function(p){ return [tName(p.tournament_id), teamName(p.team_id), p.name||"", p.number!=null?p.number:"", roleAr[p.role||"player"]||"لاعب"]; })
+  ));
+
+  var scMap = {};
+  events.filter(function(e){ return e.type==="goal" && e.player_id; }).forEach(function(e){
+    var nm = plName(e.player_id) || "غير معروف";
+    var key = e.tournament_id + "|" + nm + "|" + e.team_id;
+    if (!scMap[key]) scMap[key] = { t:e.tournament_id, name:nm, team:e.team_id, goals:0 };
+    scMap[key].goals++;
+  });
+  var scorers = Object.keys(scMap).map(function(k){ return scMap[k]; }).sort(function(a,b){ return b.goals-a.goals; });
+  addSheet("الهدّافون", [["البطولة","اللاعب","الفريق","الأهداف"]].concat(
+    scorers.map(function(s){ return [tName(s.t), s.name, teamName(s.team), s.goals]; })
+  ));
+
+  var cdMap = {};
+  events.filter(function(e){ return (e.type==="yellow"||e.type==="red") && e.player_id; }).forEach(function(e){
+    var nm = plName(e.player_id) || "غير معروف";
+    var key = e.tournament_id + "|" + nm + "|" + e.team_id;
+    if (!cdMap[key]) cdMap[key] = { t:e.tournament_id, name:nm, team:e.team_id, y:0, r:0 };
+    if (e.type==="yellow") cdMap[key].y++; else cdMap[key].r++;
+  });
+  addSheet("البطاقات", [["البطولة","اللاعب","الفريق","صفراء","حمراء"]].concat(
+    Object.keys(cdMap).map(function(k){ var c=cdMap[k]; return [tName(c.t), c.name, teamName(c.team), c.y, c.r]; })
+  ));
+
+  function computeStandings(ts, ms, pts) {
+    var P = { win: pts.win!=null?pts.win:3, draw: pts.draw!=null?pts.draw:1, loss: pts.loss!=null?pts.loss:0 };
+    var rows = {};
+    ts.forEach(function(t){ rows[t.id] = { team:t, played:0,won:0,drawn:0,lost:0,gf:0,ga:0,gd:0,points:0 }; });
+    ms.filter(function(m){ return m.status==="finished" && m.home_score!=null && m.away_score!=null && rows[m.home_team_id] && rows[m.away_team_id]; })
+      .forEach(function(m){
+        var h=rows[m.home_team_id], a=rows[m.away_team_id], hs=m.home_score, as=m.away_score;
+        h.played++; a.played++; h.gf+=hs; h.ga+=as; a.gf+=as; a.ga+=hs;
+        if(hs>as){h.won++;a.lost++;} else if(hs<as){a.won++;h.lost++;} else {h.drawn++;a.drawn++;}
+      });
+    var list = Object.keys(rows).map(function(k){ var r=rows[k]; r.gd=r.gf-r.ga; r.points=r.won*P.win+r.drawn*P.draw+r.lost*P.loss; return r; });
+    return list.sort(function(a,b){ return b.points-a.points || b.gd-a.gd || b.gf-a.gf; });
+  }
+  var standRows = [["البطولة","البيت","#","الفريق","لعب","فوز","تعادل","خسارة","له","عليه","الفارق","نقاط"]];
+  tournaments.forEach(function(t){
+    var tMatches = matches.filter(function(m){ return m.tournament_id===t.id; });
+    var pts = { win:t.win_points, draw:t.draw_points, loss:t.loss_points };
+    var tGroups = groups.filter(function(g){ return g.tournament_id===t.id; }).sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
+    var buckets = tGroups.map(function(g){ return { name:g.name, teams: teams.filter(function(x){ return x.group_id===g.id; }) }; });
+    var noGroup = teams.filter(function(x){ return x.tournament_id===t.id && x.group_id==null; });
+    if (noGroup.length) buckets.push({ name:"بدون بيت", teams:noGroup });
+    buckets.forEach(function(b){
+      if (!b.teams.length) return;
+      computeStandings(b.teams, tMatches, pts).forEach(function(r, i){
+        standRows.push([t.name, b.name, i+1, r.team.name, r.played, r.won, r.drawn, r.lost, r.gf, r.ga, r.gd, r.points]);
+      });
+    });
+  });
+  addSheet("الترتيب", standRows);
+
+  var evAr = { goal:"هدف", yellow:"إنذار", red:"طرد" };
+  var evsorted = events.slice().sort(function(a,b){ return (a.created_at||0)-(b.created_at||0); });
+  addSheet("الأحداث", [["البطولة","المباراة","الفريق","اللاعب","النوع","الدقيقة"]].concat(
+    evsorted.map(function(e){
+      var m = mById[e.match_id]||{};
+      return [ tName(e.tournament_id), teamName(m.home_team_id)+" × "+teamName(m.away_team_id), teamName(e.team_id), plName(e.player_id), evAr[e.type]||e.type, e.minute!=null?e.minute:"" ];
+    })
+  ));
+
+  if (pcomps.length) {
+    var stAr = { draft:"مسودّة", open:"مفتوحة", closed:"مغلقة للتسجيل", finished:"منتهية" };
+    addSheet("مسابقات التوقّعات", [["البطولة","العنوان","الحالة","نقاط النتيجة","نقاط الفارق","نقاط الفائز","عدد الفائزين","الجوائز"]].concat(
+      pcomps.map(function(c){ return [ tName(c.tournament_id), c.title||"", stAr[c.status]||c.status||"", c.pts_exact!=null?c.pts_exact:"", c.pts_diff!=null?c.pts_diff:"", c.pts_outcome!=null?c.pts_outcome:"", c.winners_count!=null?c.winners_count:"", (Array.isArray(c.prizes)?c.prizes.join(" | "):"") ]; })
+    ));
+  }
+
+  function cfgOf(c){ return { exact:(c&&c.pts_exact)!=null?c.pts_exact:5, diff:(c&&c.pts_diff)!=null?c.pts_diff:3, outcome:(c&&c.pts_outcome)!=null?c.pts_outcome:2 }; }
+  function predPts(pred, m, cfg){
+    if (!(m && m.status==="finished" && m.home_score!=null && m.away_score!=null)) return null;
+    if (pred.home==null || pred.away==null) return 0;
+    var ah=m.home_score, aa=m.away_score, ph=pred.home, pa=pred.away;
+    if (ph===ah && pa===aa) return cfg.exact;
+    if (sign(ah-aa)!==sign(ph-pa)) return 0;
+    if (ah-aa===ph-pa) return cfg.diff;
+    return cfg.outcome;
+  }
+  if (predictors.length) {
+    var predByKey = {};
+    predictions.forEach(function(p){ var k=p.competition_id+"|"+p.uid; (predByKey[k]=predByKey[k]||[]).push(p); });
+    var prRows = [["المسابقة","البطولة","المتوقّع","النقاط","نتائج مضبوطة","توقّعات"]];
+    predictors.forEach(function(pr){
+      var c=cById[pr.competition_id], cfg=cfgOf(c);
+      var mine=predByKey[pr.competition_id+"|"+pr.uid]||[], pts=0, exact=0;
+      mine.forEach(function(p){
+        var m=mById[p.match_id], v=predPts(p,m,cfg);
+        if (v!=null) pts+=v;
+        if (m && m.home_score===p.home && m.away_score===p.away) exact++;
+      });
+      prRows.push([ (c&&c.title)||"", tName(pr.tournament_id), pr.name||"", pts, exact, mine.length ]);
+    });
+    prRows = [prRows[0]].concat(prRows.slice(1).sort(function(a,b){ return b[3]-a[3] || b[4]-a[4]; }));
+    addSheet("المتوقّعون", prRows);
+
+    var uidName = {};
+    predictors.forEach(function(pr){ uidName[pr.competition_id+"|"+pr.uid]=pr.name||""; });
+    addSheet("التوقّعات", [["المسابقة","المتوقّع","المباراة","توقّعه","النتيجة الفعليّة","نقاطه"]].concat(
+      predictions.map(function(p){
+        var c=cById[p.competition_id], m=mById[p.match_id]||{}, v=predPts(p,m,cfgOf(c));
+        var actual=(m.home_score!=null && m.away_score!=null)?(m.home_score+" : "+m.away_score):"—";
+        return [ (c&&c.title)||"", uidName[p.competition_id+"|"+p.uid]||"", teamName(m.home_team_id)+" × "+teamName(m.away_team_id), (p.home+" : "+p.away), actual, v==null?"—":v ];
+      })
+    ));
+  }
+
+  XLSX.writeFile(wb, "نسخة-احتياطية-البطولات-" + stamp() + ".xlsx");
+}
+
+// ---- تشغيل ----
+async function run(kind) {
+  btnExcel.disabled = btnJson.disabled = true;
+  try {
+    setStatus("جارٍ الاتصال بقاعدة البيانات وتنزيل السجلّات…");
+    var d = await fetchAll();
+    showCounts(d);
+    if (kind === "excel") { exportExcel(d); setStatus("✅ تم إنشاء ملف Excel وتنزيله. احفظه في مكان آمن.", "ok"); }
+    else { exportJson(d); setStatus("✅ تم إنشاء ملف JSON وتنزيله (نسخة خام كاملة). احفظه في مكان آمن.", "ok"); }
+  } catch (err) {
+    console.error(err);
+    setStatus("تعذّر التنزيل: " + (err && err.message ? err.message : err) + "\nتأكّد من اتصال الإنترنت وأعد المحاولة. إن استمرّت المشكلة افتح هذا الملف عبر رابط الموقع بدل فتحه مباشرةً.", "err");
+  } finally {
+    btnExcel.disabled = btnJson.disabled = false;
+  }
+}
+btnExcel.addEventListener("click", function(){ run("excel"); });
+btnJson.addEventListener("click", function(){ run("json"); });
+</script>
+</body>
+</html>
