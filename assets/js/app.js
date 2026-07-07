@@ -499,6 +499,7 @@ function renderCompView(root, state, comp, comps, live, rerender) {
   const myPredictions = uid ? live.predictions.filter((p) => p.uid === uid) : [];
   const registered = !!myPredictor;
   const acceptsEntries = comp.status === "open" || comp.status === "closed";
+  const predsOpen = comp.predictions_open !== false;   // مرحلة «تسجيل فقط»: التوقّعات مغلقة حتى يفتحها المنظّم
   const standings = computePredictionStandings(live.predictors, live.predictions, state.bundle.matches, comp);
   if (!state.predSubTab) state.predSubTab = "board";
   if (state.predSubTab === "mine" && !registered) state.predSubTab = "board";
@@ -545,6 +546,7 @@ function renderCompView(root, state, comp, comps, live, rerender) {
               el("button.btn.pc-btn", { text: "🎯 " + t.joinCompetition, onclick: () => openRegisterModal(comp, state, false) }),
             ])
           : el("div.pc-note-warn", { text: t.registrationClosed })),
+    (comp.status === "open" && !predsOpen) ? el("div.pc-note-warn", { text: "⏳ " + t.predNotStartedHero }) : null,
   ]));
 
   // تبويبان فرعيّان: الترتيب (افتراضي) | توقّعاتي — كي لا يُدفن الترتيب أسفل الإدخال
@@ -558,12 +560,12 @@ function renderCompView(root, state, comp, comps, live, rerender) {
 
   const content = el("div.pc-content");
   if (state.predSubTab === "mine" && registered) {
-    content.appendChild(el("div.pc-hint", { text: "🔒 " + t.predLockHint }));
+    content.appendChild(el("div.pc-hint", { text: predsOpen ? "🔒 " + t.predLockHint : "⏳ " + t.predNotStarted }));
     const myMap = new Map(myPredictions.map((p) => [p.match_id, p]));
     const matches = state.bundle.matches.filter((m) => m.home_team_id && m.away_team_id);
     const section = el("div.pc-matches");
     if (!matches.length) section.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noMatchesToPredict }));
-    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), acceptsEntries));
+    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), acceptsEntries && predsOpen, !predsOpen));
     content.appendChild(section);
   } else {
     content.appendChild(el("div.pc-live-line", {}, [el("span.pc-live-dot"), el("span", { text: t.liveBoardNote })]));
@@ -620,7 +622,7 @@ function prizesCard(comp) {
 }
 
 // صفّ مباراة واحدة داخل «توقّعاتي»: قابل للإدخال إن كانت مجدولة، وإلا مقفل مع النتيجة والنقاط
-function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries) {
+function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, notStarted) {
   const home = teamById.get(m.home_team_id)?.name || "—";
   const away = teamById.get(m.away_team_id)?.name || "—";
   const editable = acceptsEntries && isPredictable(m);
@@ -656,7 +658,7 @@ function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries) {
     el("div.pc-row-mid", {}, [el("span.pc-result" + (m.status === "live" ? ".is-live" : ""), { text: resultTxt })]),
     nameA,
     el("div.pc-row-meta", {}, [
-      scheduledLocked ? el("span.pc-lock-note", { text: "🔒 " + t.predDeadlinePassed }) : null,
+      scheduledLocked ? el("span.pc-lock-note", { text: notStarted ? "⏳ " + t.predNotStartedShort : "🔒 " + t.predDeadlinePassed }) : null,
       el("span.pc-guess", { text: t.yourGuess + ": " + guess }),
       pts != null ? el("span.pc-pts" + (pts > 0 ? ".pos" : ""), { text: "+" + pts }) : null,
     ]),

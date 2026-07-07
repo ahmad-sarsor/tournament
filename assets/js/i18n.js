@@ -360,6 +360,16 @@ export const t = {
   pc_status_closed: "مغلقة للتسجيل",
   pc_status_finished: "منتهية",
   pcDraftHint: "المسابقة مسودّة — لن تظهر للجمهور حتى تجعلها «مفتوحة».",
+  // مرحلة «تسجيل فقط» — التوقّعات لم تبدأ بعد
+  startPredictions: "بدء التوقّعات",
+  stopPredictions: "إيقاف التوقّعات",
+  predictionsStarted: "فُتحت التوقّعات ✓",
+  predictionsStopped: "أُوقفت التوقّعات — التسجيل ما زال مفتوحًا",
+  predNotStarted: "لم تبدأ التوقّعات بعد — التسجيل مفتوح، وستُفتح إمكانية إدخال التوقّعات فور اكتمال العدد.",
+  predNotStartedShort: "لم تبدأ بعد",
+  predNotStartedHero: "التسجيل مفتوح · لم تبدأ التوقّعات بعد",
+  predictionsOpenLabel: "السماح بإدخال التوقّعات الآن",
+  predictionsOpenHint: "أبقِها مغلقة أثناء فترة التسجيل، ثمّ فعّلها عند اكتمال عدد المشاركين.",
 
   // التسجيل (المشارك)
   joinCompetition: "شارك في المسابقة",

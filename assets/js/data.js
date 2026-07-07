@@ -883,7 +883,7 @@ export function currentUid() { return auth?.currentUser?.uid || null; }
 
 // ---- المسابقات (pcomps) ----------------------------------------------------
 
-const compDefaults = () => ({ pts_exact: 5, pts_diff: 3, pts_outcome: 2, winners_count: 3 });
+const compDefaults = () => ({ pts_exact: 5, pts_diff: 3, pts_outcome: 2, winners_count: 3, predictions_open: false });
 
 export async function fetchCompetitionsByTournament(tid) {
   const snap = await getDocs(query(collection(requireDb(), "pcomps"), where("tournament_id", "==", tid)));

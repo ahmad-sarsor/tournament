@@ -669,6 +669,12 @@ async function renderPredictionsAdmin(host, state) {
         ]),
       ]),
       el("div.pc-adm-actions", {}, [
+        (c.status === "open" || c.status === "closed")
+          ? el("button.btn.btn-sm" + (c.predictions_open === false ? ".btn-primary" : ""), {
+              text: c.predictions_open === false ? "▶ " + t.startPredictions : "⏸ " + t.stopPredictions,
+              onclick: () => togglePredictions(c),
+            })
+          : null,
         el("button.btn.btn-sm", { text: "👥 " + t.viewParticipants, onclick: () => participantsModal(c, tournament) }),
         el("button.btn.btn-sm", { text: "🖼 " + t.exportImage, onclick: () => exportBoardImageFor(c, tournament) }),
         el("button.btn.btn-sm", { text: "↗ " + t.shareComp, onclick: () => shareCompetition(c, tournament) }),
@@ -758,6 +764,8 @@ function competitionForm(state, existing) {
     if ((existing?.status || "draft") === s) o.selected = true;
     return o;
   }));
+  const predOpenI = el("input", { type: "checkbox" });
+  predOpenI.checked = existing ? existing.predictions_open !== false : false;
   const exactI = numInput(existing?.pts_exact ?? 5);
   const diffI = numInput(existing?.pts_diff ?? 3);
   const outI = numInput(existing?.pts_outcome ?? 2);
@@ -770,6 +778,10 @@ function competitionForm(state, existing) {
     el("div.field", {}, [el("label", { text: t.compTitle }), titleI]),
     el("div.field", {}, [el("label", { text: t.compDesc }), descI]),
     el("div.field", {}, [el("label", { text: t.compStatus }), statusSel, el("div.field-hint", { text: t.compLaunchHint })]),
+    el("div.field", {}, [
+      el("label", { style: "display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600" }, [predOpenI, el("span", { text: t.predictionsOpenLabel })]),
+      el("div.field-hint", { text: t.predictionsOpenHint }),
+    ]),
     el("div.pc-grid3", {}, [
       el("div.field", {}, [el("label", { text: t.ptsExact }), exactI]),
       el("div.field", {}, [el("label", { text: t.ptsDiff }), diffI]),
@@ -791,6 +803,7 @@ function competitionForm(state, existing) {
       title,
       description: descI.value.trim() || null,
       status: statusSel.value,
+      predictions_open: predOpenI.checked,
       pts_exact: toInt(exactI.value, 5),
       pts_diff: toInt(diffI.value, 3),
       pts_outcome: toInt(outI.value, 2),
@@ -813,6 +826,16 @@ function competitionForm(state, existing) {
       el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close() }),
     ],
   });
+}
+
+// بدء/إيقاف إدخال التوقّعات (مرحلة «تسجيل فقط»): التسجيل يبقى مضبوطًا بالحالة (status)
+async function togglePredictions(c) {
+  const open = c.predictions_open === false;   // نُبدّل إلى المعاكس
+  try {
+    await api.updateCompetition(c.id, { predictions_open: open });
+    toast(open ? t.predictionsStarted : t.predictionsStopped, "ok");
+    route();
+  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
 async function removeCompetition(c) {

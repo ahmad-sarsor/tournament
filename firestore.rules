@@ -304,12 +304,13 @@ service cloud.firestore {
     function pcompKeys() {
       return ['tournament_id', 'title', 'description', 'status', 'owner_email',
               'pts_exact', 'pts_diff', 'pts_outcome', 'winners_count', 'prizes',
-              'created_at', 'sort_order'];
+              'predictions_open', 'created_at', 'sort_order'];
     }
     function pcompValuesOk(d) {
       return okStr(d.get('title', ''), 120)
         && okOptStr(d, 'description', 1000)
         && (!('status' in d) || d.status in ['draft', 'open', 'closed', 'finished'])
+        && (!('predictions_open' in d) || d.predictions_open is bool)
         && okOptInt(d, 'pts_exact', 0, 1000)
         && okOptInt(d, 'pts_diff', 0, 1000)
         && okOptInt(d, 'pts_outcome', 0, 1000)
@@ -394,6 +395,7 @@ service cloud.firestore {
     function predEntryAllowed(d) {
       return pcompExists(d.competition_id)
         && pcomp(d.competition_id).status in ['open', 'closed']
+        && pcomp(d.competition_id).get('predictions_open', true) == true
         && pcomp(d.competition_id).tournament_id == d.tournament_id
         && matchExists(d.match_id)
         && matchDoc(d.match_id).status == 'scheduled'
