@@ -474,6 +474,11 @@ export const t = {
   downloadShareImage: "تنزيل صورة الدعوة",
   copyTextAndLink: "نسخ النص والرابط",
   shareTextCopied: "نُسخ النص والرابط — ألصقه في واتساب",
+  // صفحة الفريق
+  goalsForAgainst: "له/عليه",
+  teamTopScorers: "هدّافو الفريق",
+  teamMatches: "مباريات الفريق",
+  squadTitle: "التشكيلة",
   approvedDone: "تم اعتماد المشارك ✔",
   pendingCountLbl: "بانتظار الموافقة",
   recoverLink: "سجّلت من قبل؟ استعد مشاركتك برقم هاتفك",

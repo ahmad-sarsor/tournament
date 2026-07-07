@@ -905,3 +905,9 @@ h1, h2, h3, .page-title, .brand, .mp-title, .standings-title, .lc-events-title,
 .bk-match.bk-final { border: 2px solid var(--sun); box-shadow: 0 0 0 4px color-mix(in srgb, var(--sun) 16%, transparent), var(--shadow-sm); }
 .bk-final .bk-win { background: var(--sun-soft); }
 .bk-final .bk-win .bk-team, .bk-final .bk-win .bk-score { color: var(--sun-ink); }
+
+/* ---- روابط أسماء الفرق إلى صفحة الفريق ------------------------------------ */
+a.team-link { color: inherit; text-decoration: none; }
+a.team-link:hover .team-name, a.team-link:hover .stat-team { text-decoration: underline; text-underline-offset: 3px; }
+a.mp-team { color: inherit; text-decoration: none; cursor: pointer; }
+a.mp-team:hover .mp-team-name { text-decoration: underline; text-underline-offset: 3px; }

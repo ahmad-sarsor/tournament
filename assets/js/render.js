@@ -65,8 +65,8 @@ export function groupByDay(matches) {
   return [...map.entries()]; // [[date, matches], ...] محافظ على ترتيب الإدخال
 }
 
-// آخر النتائج لفريق (حتى ٥) لعرض «السجل»
-function teamForm(teamId, matches) {
+// آخر النتائج لفريق (حتى ٥) لعرض «السجل» — تُستخدم أيضاً في صفحة الفريق
+export function teamForm(teamId, matches) {
   const played = matches
     .filter((m) => isCounted(m) && (m.home_team_id === teamId || m.away_team_id === teamId))
     .sort((a, b) => ((a.match_date || "") + (a.match_time || "")).localeCompare((b.match_date || "") + (b.match_time || "")));
@@ -77,7 +77,7 @@ function teamForm(teamId, matches) {
     return gf > ga ? "w" : gf < ga ? "l" : "d";
   });
 }
-function formGuide(results) {
+export function formGuide(results) {
   const wrap = el("span.form-guide");
   for (const r of results) wrap.appendChild(el("span.form-dot." + r, { text: { w: "ف", d: "ت", l: "خ" }[r] }));
   return wrap;
@@ -203,8 +203,9 @@ export function predictionBoard(standings, comp, opts = {}) {
   return el("div.table-wrap", {}, [el("table.standings", {}, [head, body])]);
 }
 
-// جدول ترتيب بيت واحد
-export function standingsTable(groupTeams, matches, points, qualifiers) {
+// جدول ترتيب بيت واحد. opts.tid: اسم الفريق يصبح رابطاً إلى صفحته
+export function standingsTable(groupTeams, matches, points, qualifiers, opts = {}) {
+  const { tid } = opts;
   const rows = computeGroupStandings(groupTeams, matches, points);
   const head = el("thead", {}, [
     el("tr", {}, [
@@ -228,7 +229,9 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
     const gdClass = r.gd > 0 ? ".pos" : r.gd < 0 ? ".neg" : "";
     body.appendChild(el("tr" + (qualify ? ".qualify" : "") + (champion ? ".champion" : ""), {}, [
       el("td", {}, [el("span.rank", { text: String(r.rank) })]),
-      el("td.team-col", {}, [el("span.team-name", { text: r.team.name })]),
+      el("td.team-col", {}, [tid
+        ? el("a.team-link", { href: `#/t/${tid}/team/${r.team.id}` }, [el("span.team-name", { text: r.team.name })])
+        : el("span.team-name", { text: r.team.name })]),
       el("td", { text: String(r.played) }),
       el("td", { text: String(r.won) }),
       el("td", { text: String(r.drawn) }),
