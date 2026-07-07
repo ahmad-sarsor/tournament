@@ -21,7 +21,7 @@ function bracketMatch(m, teamById, opts = {}) {
     el("span.bk-team", { text: team ? team.name : (teamId ? "—" : t.tbd) }),
     el("span.bk-score", { text: finished ? String(score ?? 0) : "" }),
   ]);
-  const card = el("div.bk-match" + (m.status === "live" ? ".is-live" : ""), {}, [
+  const card = el("div.bk-match" + (opts.isFinal ? ".bk-final" : "") + (m.status === "live" ? ".is-live" : ""), {}, [
     side(home, m.home_team_id, m.home_score),
     side(away, m.away_team_id, m.away_score),
   ]);
@@ -42,8 +42,12 @@ export function renderBracket(matches, teamById, opts = {}) {
   const scroller = el("div.bracket-scroll");
   const wrap = el("div.bracket");
   for (let r = 1; r <= rounds; r++) {
-    const col = el("div.bracket-col", {}, [el("div.bracket-round-title", { text: knockoutRoundName(r, rounds) })]);
-    for (const m of ko.filter((x) => x.round === r)) col.appendChild(bracketMatch(m, teamById, opts));
+    const isFinal = r === rounds;
+    const col = el("div.bracket-col" + (isFinal ? ".bk-final-col" : ""), {}, [
+      isFinal ? el("div.bk-trophy", { "aria-hidden": "true", text: "🏆" }) : null,
+      el("div.bracket-round-title", { text: knockoutRoundName(r, rounds) }),
+    ]);
+    for (const m of ko.filter((x) => x.round === r)) col.appendChild(bracketMatch(m, teamById, { ...opts, isFinal }));
     wrap.appendChild(col);
   }
   scroller.appendChild(wrap);

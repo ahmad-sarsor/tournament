@@ -970,25 +970,35 @@ async function renderMatchDetail(id, matchId) {
       : el("div.mp-score.time", {}, [match.match_time ? formatTime(match.match_time) : t.vs]);
 
     const metaParts = [
-      group ? group.name : null,
-      match.match_date ? weekdayName(match.match_date) + " " + formatDate(match.match_date) : null,
-      match.match_time ? formatTime(match.match_time) : null,
+      group ? "🛡️ " + group.name : null,
+      match.match_date ? "📅 " + weekdayName(match.match_date) + " " + formatDate(match.match_date) : null,
+      match.match_time ? "🕐 " + formatTime(match.match_time) : null,
     ].filter(Boolean);
 
     mount(host,
       el("div.mp-scoreboard" + (live ? ".is-live" : ""), {}, [
-        el("div.mp-team", {}, [el("span.mp-team-name", { text: home ? home.name : "—" })]),
-        scoreMid,
-        el("div.mp-team", {}, [el("span.mp-team-name", { text: away ? away.name : "—" })]),
+        el("div.mp-team", {}, [
+          el("div.mp-team-badge", { "aria-hidden": "true", text: "⚽" }),
+          el("span.mp-team-name", { text: home ? home.name : "—" }),
+        ]),
+        el("div", {}, [
+          scoreMid,
+          live ? el("div.mp-minute", {}, [
+            el("span.badge.badge-live", {}, [el("span.dot"), match.minute != null ? t.live + " · " + match.minute + "'" : t.live]),
+          ]) : null,
+        ]),
+        el("div.mp-team", {}, [
+          el("div.mp-team-badge", { "aria-hidden": "true", text: "⚽" }),
+          el("span.mp-team-name", { text: away ? away.name : "—" }),
+        ]),
       ]),
       el("div.mp-meta", {}, [
         el("span", { text: metaParts.join(" · ") }),
-        live ? el("span.badge.badge-live", {}, [el("span.dot"), t.live])
-             : el("span.badge.badge-" + (finished ? "finished" : "upcoming"), { text: matchStatusLabel(match.status) }),
+        !live ? el("span.badge.badge-" + (finished ? "finished" : "upcoming"), { text: matchStatusLabel(match.status) }) : null,
       ]),
       el("div.mp-section", {}, [
         el("h3.mp-title", { text: t.events }),
-        events.length ? el("div.card", {}, [eventsTimeline(events, playersById, teamById, { homeId: match.home_team_id, awayId: match.away_team_id })])
+        events.length ? el("div.card.card-pad", {}, [eventsTimeline(events, playersById, teamById, { homeId: match.home_team_id, awayId: match.away_team_id })])
                       : el("p.page-sub", { style: "padding:6px 2px", text: t.noEvents }),
       ]),
     );

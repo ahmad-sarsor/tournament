@@ -880,3 +880,28 @@ h1, h2, h3, .page-title, .brand, .mp-title, .standings-title, .lc-events-title,
 
 /* حلقة تركيز أوضح للحقول */
 .input:focus, .select:focus, textarea.input:focus { box-shadow: 0 0 0 3px var(--ring); }
+
+/* ==========================================================================
+   إكمال تصميم Claude — لوحة المباراة (شارة الفريق + الدقيقة المباشرة)،
+   الشارة الذهبيّة، الزرّ الشمسي، وتتويج نهائي شجرة خروج المغلوب.
+   (منقولة حرفيًّا من tokens/components.css في مجلد التصميم)
+   ========================================================================== */
+.mp-team-badge {
+  width: 54px; height: 54px; margin: 0 auto 8px; border-radius: 50%;
+  background: rgba(255,255,255,.16); border: 2px solid rgba(255,255,255,.35);
+  display: grid; place-items: center; font-size: 1.5rem;
+}
+.mp-minute { text-align: center; margin-top: 8px; }
+.mp-minute .badge { font-size: .8rem; }
+
+.badge-gold { background: var(--sun-soft); color: var(--sun-ink); border-color: color-mix(in srgb, var(--sun) 45%, transparent); }
+
+.btn-sun { background: var(--sun); color: #4a2d00; border-color: transparent; box-shadow: 0 3px 0 #c77f00; }
+.btn-sun:hover { filter: brightness(1.05); background: var(--sun); }
+.btn-sun:active { transform: translateY(3px); box-shadow: 0 0 0 #c77f00; }
+
+.bk-final-col .bracket-round-title { color: var(--sun-ink); }
+.bk-trophy { text-align: center; font-size: 2.1rem; line-height: 1; margin-bottom: 4px; filter: drop-shadow(0 3px 6px color-mix(in srgb, var(--sun) 45%, transparent)); }
+.bk-match.bk-final { border: 2px solid var(--sun); box-shadow: 0 0 0 4px color-mix(in srgb, var(--sun) 16%, transparent), var(--shadow-sm); }
+.bk-final .bk-win { background: var(--sun-soft); }
+.bk-final .bk-win .bk-team, .bk-final .bk-win .bk-score { color: var(--sun-ink); }
