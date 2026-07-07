@@ -128,20 +128,40 @@ async function renderHome() {
   if (!tournaments.length) {
     return mount(app, head, emptyState("🏆", "لا توجد بطولات بعد"));
   }
+  // إحصاءات كل بطولة (مباريات/فرق/بيوت) لملء بطاقات التصميم — بالتوازي، مع تحمّل الأخطاء
+  const stats = await Promise.all(tournaments.map((tr) =>
+    fetchTournamentBundle(tr.id)
+      .then((b) => ({
+        total: b.matches.length,
+        done: b.matches.filter((m) => m.status === "finished").length,
+        teams: b.teams.length,
+        groups: b.groups.length,
+      }))
+      .catch(() => null)
+  ));
   const grid = el("div.grid.cols");
-  for (const tr of tournaments) grid.appendChild(tournamentCard(tr));
+  tournaments.forEach((tr, i) => grid.appendChild(tournamentCard(tr, stats[i])));
   mount(app, head, grid);
 }
 
-function tournamentCard(tr) {
+function tournamentCard(tr, stats) {
   const dates = [tr.start_date, tr.end_date].filter(Boolean).map(formatDate).join(" ← ");
+  const chips = [];
+  if (dates) chips.push(el("span", { dir: "auto", style: "white-space:nowrap", text: "📅 " + dates }));
+  if (stats && stats.teams) chips.push(el("span", { style: "white-space:nowrap", text: `👥 ${stats.teams} ${stats.teams === 1 ? "فريق" : "فريقاً"}` }));
+  if (stats && stats.groups) chips.push(el("span", { style: "white-space:nowrap", text: `🛡️ ${stats.groups} ${stats.groups === 1 ? "بيت" : "بيوت"}` }));
+  const pct = stats && stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
   return el("a.t-card", { href: `#/t/${tr.id}` }, [
-    el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
-      el("h3", { text: tr.name }),
+    el("div", { style: "display:flex;align-items:flex-start;justify-content:space-between;gap:10px" }, [
+      el("h3", {}, [el("span.t-emoji", { text: tr.emoji || "🏆" }), tr.name]),
       statusBadge(tr.status),
     ]),
-    tr.description ? el("p.page-sub", { text: tr.description }) : null,
-    el("div.meta", {}, [ dates ? el("span", { text: "🗓️ " + dates }) : null ]),
+    tr.description ? el("p.meta", { style: "margin-top:6px", text: tr.description }) : null,
+    chips.length ? el("div.meta", {}, chips) : null,
+    (stats && stats.total) ? el("div.t-progress", {}, [
+      el("div.bar", {}, [el("i", { style: `width:${pct}%` })]),
+      el("div.lbl", { text: `${stats.done} / ${stats.total} مباراة` }),
+    ]) : null,
   ]);
 }
 

@@ -182,7 +182,8 @@ img { max-width: 100%; }
   position: relative; overflow: hidden;
 }
 .t-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: var(--border-2); }
-.t-card h3 { font-size: 1.2rem; font-weight: 700; }
+.t-card h3 { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.t-card .t-emoji { font-size: 1.4rem; line-height: 1; }
 .t-card .meta { color: var(--text-2); font-size: .875rem; margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .t-progress { margin-top: 14px; }
 .t-progress .bar { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
