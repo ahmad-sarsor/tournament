@@ -392,7 +392,9 @@ service cloud.firestore {
         && okOptNum(d, 'created_at');
     }
     match /predictorContacts/{id} {
-      allow read: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
+      // isPlatformAdmin أولاً: شرط بلا اعتماد على الوثيقة — يجعل استعلامات القائمة
+      // قابلة للإثبات لمدير المنصّة مباشرة (قواعد القوائم تُقيَّم من شكل الاستعلام)
+      allow read: if isPlatformAdmin() || isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
       allow create: if isSelf(request.resource.data.uid)
         && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'phone', 'email', 'age', 'phone_verified', 'created_at'])
         && contactValuesOk(request.resource.data)

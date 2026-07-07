@@ -1031,9 +1031,14 @@ export async function updateCompetition(id, patch) {
   return { id, ...patch };
 }
 export async function deleteCompetition(id) {
+  // نجلب المسابقة أولاً: استعلام قائمة التواصل يتطلّب فلتر tournament_id (انظر fetchPredictorContacts)
+  const comp = await fetchCompetition(id);
   await deleteWhere("predictions", "competition_id", id);
   await deleteWhere("predictors", "competition_id", id);
-  await deleteWhere("predictorContacts", "competition_id", id);
+  if (comp) {
+    const contacts = await fetchPredictorContacts(id, comp.tournament_id);
+    await batchOp(contacts.map((c) => doc(requireDb(), "predictorContacts", c.id)), (b, ref) => b.delete(ref));
+  }
   await deleteDoc(doc(requireDb(), "pcomps", id));
 }
 
@@ -1107,9 +1112,12 @@ export async function fetchPredictors(compId) {
   const snap = await getDocs(query(collection(requireDb(), "predictors"), where("competition_id", "==", compId)));
   return mapDocs(snap);
 }
-// قائمة التواصل الكاملة — للمنظّم فقط (تفشل للمستخدم العادي بحكم القواعد)
-export async function fetchPredictorContacts(compId) {
-  const snap = await getDocs(query(collection(requireDb(), "predictorContacts"), where("competition_id", "==", compId)));
+// قائمة التواصل الكاملة — للمنظّم فقط (تفشل للمستخدم العادي بحكم القواعد).
+// فلتر tournament_id إلزامي: قواعد القوائم في Firestore تُثبَت من شكل الاستعلام،
+// وقاعدة القراءة تعتمد على tournament_id — بدونه يُرفض الاستعلام حتى للمالك.
+export async function fetchPredictorContacts(compId, tid) {
+  const snap = await getDocs(query(collection(requireDb(), "predictorContacts"),
+    where("competition_id", "==", compId), where("tournament_id", "==", tid)));
   return mapDocs(snap);
 }
 

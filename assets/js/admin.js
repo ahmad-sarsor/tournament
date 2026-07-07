@@ -859,11 +859,14 @@ async function participantsModal(comp, tournament) {
   const body = el("div", {}, [spinner()]);
   openModal({ title: "👥 " + t.participantsTitle, body });
   try {
+    // بيانات التواصل قد تفشل (قواعد لم تُنشر بعد/صلاحية ناقصة) — نُظهر الجدول بدونها بدل فشل كامل
     const [predictors, contacts, predictions, bundle] = await Promise.all([
-      api.fetchPredictors(comp.id), api.fetchPredictorContacts(comp.id),
+      api.fetchPredictors(comp.id),
+      api.fetchPredictorContacts(comp.id, tournament.id).catch((e) => { console.warn(e); return null; }),
       api.fetchPredictions(comp.id), api.fetchTournamentBundle(tournament.id),
     ]);
-    const contactByUid = new Map(contacts.map((c) => [c.uid, c]));
+    const contactsFailed = contacts == null;
+    const contactByUid = new Map((contacts || []).map((c) => [c.uid, c]));
     const standings = api.computePredictionStandings(predictors, predictions, bundle.matches, comp);
     if (!standings.length) { mount(body, emptyState("👥", t.noParticipants)); return; }
 
@@ -929,6 +932,7 @@ async function participantsModal(comp, tournament) {
         el("span.page-sub", { style: "margin:0", text: `${t.compParticipants}: ${standings.length}` }),
         exportBtn,
       ]),
+      contactsFailed ? el("div.alert.alert-warn", { style: "margin:0 0 12px", text: t.contactsLoadFailed }) : null,
       table);
   } catch (e) {
     mount(body, el("div.alert.alert-error", { text: e.message || t.errorGeneric }));

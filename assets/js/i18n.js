@@ -424,6 +424,7 @@ export const t = {
   pendingLockNote: "بانتظار الموافقة",
   approveBtn: "اعتماد",
   okGotIt: "حسناً",
+  contactsLoadFailed: "تعذّر جلب بيانات التواصل (هاتف/بريد) — تأكّد من نشر أحدث قواعد الأمان (firestore.rules) في Firebase Console.",
   approvedDone: "تم اعتماد المشارك ✔",
   pendingCountLbl: "بانتظار الموافقة",
   recoverLink: "سجّلت من قبل؟ استعد مشاركتك برقم هاتفك",
