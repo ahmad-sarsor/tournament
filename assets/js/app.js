@@ -341,8 +341,12 @@ function renderStats(state) {
   }
   wrap.appendChild(content);
 
-  function statTile(value, label) {
-    return el("div.stat-tile", {}, [el("div.stat-val", { text: String(value) }), el("div.stat-lbl", { text: label })]);
+  function statTile(icon, value, label) {
+    return el("div.stat-tile", {}, [
+      icon ? el("div.stat-ico", { "aria-hidden": "true", text: icon }) : null,
+      el("div.stat-val", { text: String(value) }),
+      el("div.stat-lbl", { text: label }),
+    ]);
   }
 
   function rerender() {
@@ -395,10 +399,10 @@ function renderStats(state) {
 
     // بلاطات ملخّص
     const tiles = el("div.stat-tiles", {}, [
-      statTile(played.length, t.statMatchesPlayed),
-      statTile(totalGoals, t.statTotalGoals),
-      statTile(avg, t.statAvgGoals),
-      statTile(scorers[0] ? scorers[0].name : "—", t.statTopScorer),
+      statTile("🏟️", played.length, t.statMatchesPlayed),
+      statTile("⚽", totalGoals, t.statTotalGoals),
+      statTile("📈", avg, t.statAvgGoals),
+      statTile("👟", scorers[0] ? scorers[0].name : "—", t.statTopScorer),
     ]);
 
     const showGroupCol = bundle.groups.length > 0;
