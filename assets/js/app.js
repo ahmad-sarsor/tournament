@@ -14,7 +14,7 @@ import {
   phoneOtpMode, toE164, startPhoneAuth, confirmPhoneCode, clearPhoneRecaptcha,
   pendingEmailLink, completeEmailLink, sendContestEmailLink,
 } from "./data.js";
-import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket, predictionBoard } from "./render.js";
+import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket, predictionBoard, shareCompetitionFlow } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
@@ -572,7 +572,7 @@ function renderCompView(root, state, comp, comps, live, rerender) {
     ]));
   }
 
-  // رأس المسابقة (شارة + عنوان + وصف) بلون مميّز
+  // رأس المسابقة (شارة + عنوان + وصف + زر مشاركة) بلون مميّز
   blocks.push(el("div.pc-hero", {}, [
     el("div.pc-hero-top", {}, [
       el("span.pc-hero-icon", { text: "🎯" }),
@@ -581,6 +581,16 @@ function renderCompView(root, state, comp, comps, live, rerender) {
         el("div.pc-hero-sub", { text: t.predictionComp }),
       ]),
       compStatusBadge(comp.status),
+      el("button.icon-btn", {
+        text: "↗", title: t.shareComp, "aria-label": t.shareComp,
+        style: "color:#fff;background:rgba(255,255,255,.16);border-radius:10px;flex:none",
+        onclick: () => {
+          const u = new URL(location.href);
+          u.search = "";
+          u.hash = `#/t/${state.tournament.id}/predictions`;
+          shareCompetitionFlow(comp, state.tournament, u.href);
+        },
+      }),
     ]),
     comp.description ? el("p.pc-hero-desc", { text: comp.description }) : null,
     // شريط حالتي المضغوط

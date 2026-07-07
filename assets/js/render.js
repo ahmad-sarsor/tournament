@@ -1,9 +1,9 @@
 // ============================================================================
 //  عناصر عرض مشتركة: بطاقة المباراة + جدول الترتيب (تُستخدم في الواجهة والإدارة)
 // ============================================================================
-import { el } from "./util.js";
+import { el, toast, openModal } from "./util.js";
 import { t, formatTime, formatDate, weekdayName } from "./i18n.js";
-import { computeGroupStandings, isCounted, knockoutWinner } from "./data.js";
+import { computeGroupStandings, isCounted, knockoutWinner, compScoring } from "./data.js";
 
 // اسم جولة الخروج حسب قربها من النهائي
 export function knockoutRoundName(r, totalRounds) {
@@ -241,4 +241,184 @@ export function standingsTable(groupTeams, matches, points, qualifiers) {
     ]));
   }
   return el("div.table-wrap", {}, [el("table.standings", {}, [head, body])]);
+}
+
+// ============================================================================
+//  مشاركة المسابقة: صورة دعوة مولَّدة (canvas) + مسار مشاركة أصلي (واتساب وغيره)
+// ============================================================================
+
+// لفّ نصّ على أسطر بحسب عرض أقصى (يعيد مصفوفة أسطر)
+function wrapText(ctx, text, maxW, maxLines = 3) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? line + " " + w : w;
+    if (ctx.measureText(test).width > maxW && line) {
+      lines.push(line); line = w;
+      if (lines.length === maxLines) { lines[maxLines - 1] += "…"; return lines; }
+    } else line = test;
+  }
+  if (line) lines.push(line);
+  return lines.slice(0, maxLines);
+}
+
+// مستطيل بزوايا دائرية (توافقاً مع متصفحات بلا ctx.roundRect)
+function rr(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// صورة دعوة للمسابقة (1080×1350): العنوان + البطولة + الوصف + الجوائز + النقاط + الرابط
+export async function buildCompShareCard(comp, tournament, url) {
+  try { await document.fonts.ready; } catch {}
+  const W = 1080, H = 1350, pad = 84;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  const FONT = "'IBM Plex Sans Arabic','Tajawal','Segoe UI',sans-serif";
+  ctx.direction = "rtl";
+
+  // خلفية متدرّجة + دوائر زخرفية
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, "#241b52"); g.addColorStop(1, "#3b0764");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "rgba(255,255,255,.05)";
+  for (const [cx, cy, r] of [[W - 80, 120, 190], [90, H - 160, 230], [W - 140, H - 320, 120]]) {
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  let y = 108;
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#c4b5fd"; ctx.font = `700 32px ${FONT}`;
+  ctx.fillText("منصّة البطولات", W / 2, y); y += 96;
+  ctx.font = `96px ${FONT}`; ctx.fillText("🎯", W / 2, y); y += 64;
+  ctx.fillStyle = "#ddd6fe"; ctx.font = `700 36px ${FONT}`;
+  ctx.fillText(t.predictionComp, W / 2, y); y += 84;
+
+  ctx.fillStyle = "#fff"; ctx.font = `800 62px ${FONT}`;
+  for (const line of wrapText(ctx, comp.title || t.predictionComp, W - pad * 2, 2)) {
+    ctx.fillText(line, W / 2, y); y += 74;
+  }
+  y += 8;
+  ctx.fillStyle = "rgba(255,255,255,.82)"; ctx.font = `600 38px ${FONT}`;
+  ctx.fillText(tournament?.name || "", W / 2, y); y += 58;
+
+  if (comp.description) {
+    ctx.fillStyle = "rgba(255,255,255,.72)"; ctx.font = `500 30px ${FONT}`;
+    for (const line of wrapText(ctx, comp.description, W - pad * 2, 2)) {
+      ctx.fillText(line, W / 2, y); y += 42;
+    }
+    y += 10;
+  }
+
+  // بطاقة الجوائز
+  const prizes = (Array.isArray(comp.prizes) ? comp.prizes : []).filter(Boolean).slice(0, 5);
+  if (prizes.length) {
+    const rowH = 58, boxH = 96 + prizes.length * rowH;
+    rr(ctx, pad, y, W - pad * 2, boxH, 26);
+    ctx.fillStyle = "rgba(255,255,255,.09)"; ctx.fill();
+    ctx.fillStyle = "#fbbf24"; ctx.font = `800 38px ${FONT}`; ctx.textAlign = "center";
+    ctx.fillText("🎁 " + t.prizesTitle, W / 2, y + 60);
+    const medal = (r) => ({ 1: "🥇", 2: "🥈", 3: "🥉" }[r] || "#" + r);
+    ctx.textAlign = "right";
+    prizes.forEach((p, i) => {
+      const ry = y + 108 + i * rowH;
+      ctx.font = `700 36px ${FONT}`; ctx.fillStyle = "#fff";
+      ctx.fillText(medal(i + 1), W - pad - 28, ry);
+      ctx.font = `600 32px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.92)";
+      let txt = String(p);
+      while (ctx.measureText(txt).width > W - pad * 2 - 140 && txt.length > 3) txt = txt.slice(0, -2);
+      ctx.fillText(txt, W - pad - 92, ry);
+    });
+    y += boxH + 34;
+  }
+
+  // سطر النقاط — نُصغّر الخط تلقائياً حتى يتّسع في العرض
+  const s = compScoring(comp);
+  const scoreLine = `🎯 ${t.scoringExact}: ${s.exact} · ↔️ ${t.scoringDiff}: ${s.diff} · ✔️ ${t.scoringOutcome}: ${s.outcome}`;
+  ctx.textAlign = "center"; ctx.fillStyle = "rgba(255,255,255,.75)";
+  let scorePx = 28;
+  do { ctx.font = `600 ${scorePx}px ${FONT}`; scorePx--; }
+  while (scorePx > 18 && ctx.measureText(scoreLine).width > W - pad * 2);
+  ctx.fillText(scoreLine, W / 2, y);
+  y += 64;
+
+  // زرّ دعوة (شكليّ)
+  const btnW = 520, btnH = 88;
+  rr(ctx, (W - btnW) / 2, y, btnW, btnH, 44);
+  ctx.fillStyle = "#7c3aed"; ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = `800 38px ${FONT}`;
+  ctx.fillText(t.shareCardCta, W / 2, y + 58);
+  y += btnH + 56;
+
+  // الرابط أسفل الصورة
+  ctx.direction = "ltr"; ctx.font = `600 26px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.6)";
+  let link = String(url || "").replace(/^https?:\/\//, "");
+  while (ctx.measureText(link).width > W - pad * 2 && link.length > 10) link = link.slice(0, -4) + "…";
+  ctx.fillText(link, W / 2, Math.max(y, H - 64));
+
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+// نافذة احتياطية: معاينة الصورة + تنزيل + نسخ النص والرابط + QR (حين لا تتوفر المشاركة الأصلية)
+function shareCardModal(comp, url, blob, text) {
+  const objUrl = blob ? URL.createObjectURL(blob) : null;
+  const img = objUrl ? el("img", {
+    alt: "", src: objUrl,
+    style: "display:block;width:100%;max-width:300px;margin:0 auto 12px;border-radius:14px;box-shadow:var(--shadow-sm)",
+  }) : null;
+  const qr = el("img", {
+    alt: "QR", width: "160", height: "160",
+    style: "display:block;margin:10px auto 0;border-radius:12px;background:#fff;padding:8px;box-shadow:var(--shadow-sm)",
+    src: `https://api.qrserver.com/v1/create-qr-code/?size=180x180&margin=0&data=${encodeURIComponent(url)}`,
+  });
+  qr.addEventListener("error", () => { qr.style.display = "none"; });
+
+  const dlBtn = objUrl ? el("a.btn.btn-primary.btn-block", {
+    href: objUrl, download: (comp.title || "contest").replace(/[\\/:*?"<>|]/g, "-").slice(0, 40) + ".png",
+    text: "💾 " + t.downloadShareImage,
+  }) : null;
+  const copyAllBtn = el("button.btn.btn-outline.btn-block", {
+    type: "button", text: "📋 " + t.copyTextAndLink,
+    onclick: async () => {
+      try { await navigator.clipboard.writeText(text); toast(t.shareTextCopied, "ok"); }
+      catch { toast(t.errorGeneric, "err"); }
+    },
+  });
+  const nativeBtn = navigator.share ? el("button.btn.btn-outline.btn-block", {
+    type: "button", text: "↗ " + t.share,
+    onclick: async () => { try { await navigator.share({ title: comp.title || t.predictionComp, text, url }); } catch {} },
+  }) : null;
+
+  openModal({
+    title: "↗ " + t.shareCompTitle,
+    body: el("div", {}, [
+      el("p.page-sub", { style: "margin:0 0 12px;text-align:center", text: t.shareCompHint }),
+      img,
+      el("div", { style: "display:flex;flex-direction:column;gap:8px" }, [dlBtn, copyAllBtn, nativeBtn].filter(Boolean)),
+      qr,
+    ]),
+    onDismiss: () => { if (objUrl) setTimeout(() => URL.revokeObjectURL(objUrl), 5000); },
+  });
+}
+
+// مسار المشاركة الكامل: صورة + نص + رابط عبر مشاركة النظام (واتساب…)، وإلا نافذة احتياطية
+export async function shareCompetitionFlow(comp, tournament, url) {
+  const text = `🎯 ${comp.title || t.predictionComp} — ${tournament?.name || ""}\n${t.shareCompText}\n${url}`;
+  let blob = null;
+  try { blob = await buildCompShareCard(comp, tournament, url); } catch (e) { console.warn(e); }
+  const file = blob ? new File([blob], "contest.png", { type: "image/png" }) : null;
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({ files: [file], text, title: comp.title || t.predictionComp });
+      return;
+    } catch (e) { if (e?.name === "AbortError") return; console.warn(e); }
+  }
+  shareCardModal(comp, url, blob, text);
 }

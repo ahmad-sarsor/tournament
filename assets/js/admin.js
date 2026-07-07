@@ -5,7 +5,7 @@ import { isConfigured } from "./firebase.js";
 import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog, downloadCsv } from "./util.js";
 import * as api from "./data.js";
-import { groupByDay, eventIcon, renderBracket, knockoutRoundName } from "./render.js";
+import { groupByDay, eventIcon, renderBracket, knockoutRoundName, shareCompetitionFlow } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 
 const app = document.getElementById("app");
@@ -1006,40 +1006,10 @@ function participantEditForm(comp, row, contact, onSaved) {
 
 // مشاركة رابط المسابقة (نسخ + مشاركة أصليّة + رمز QR)
 function shareCompetition(comp, tournament) {
+  // نفس مسار المشاركة العامّ: صورة دعوة مولَّدة + نص + رابط (واتساب…)، أو نافذة تنزيل/نسخ/QR
   const u = new URL("./index.html", location.href);   // صفحة العرض العامّة (شقيقة admin.html)
   u.hash = `#/t/${tournament.id}/predictions`;
-  const url = u.href;
-
-  const linkBox = el("input.input", { type: "text", value: url, readonly: true, style: "direction:ltr;text-align:start;font-size:.8rem" });
-  linkBox.addEventListener("focus", () => linkBox.select());
-
-  const copyBtn = el("button.btn.btn-primary", { type: "button", text: "📋 " + t.copyLink, onclick: async () => {
-    try { await navigator.clipboard.writeText(url); toast(t.linkCopied, "ok"); }
-    catch { linkBox.focus(); try { document.execCommand("copy"); toast(t.linkCopied, "ok"); } catch { toast(url, ""); } }
-  } });
-  const shareBtn = navigator.share
-    ? el("button.btn.btn-outline", { type: "button", text: "↗ " + t.share, onclick: async () => {
-        try { await navigator.share({ title: comp.title || t.predictionComp, url }); } catch {}
-      } })
-    : null;
-
-  // رمز QR عبر خدمة صور خارجية (رابط عامّ غير حسّاس)؛ يُخفى تلقائياً إن تعذّر تحميله
-  const qr = el("img", {
-    alt: "QR", width: "200", height: "200",
-    style: "display:block;margin:4px auto 0;border-radius:12px;background:#fff;padding:10px;box-shadow:var(--shadow-sm)",
-    src: `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=0&data=${encodeURIComponent(url)}`,
-  });
-  qr.addEventListener("error", () => { qr.style.display = "none"; });
-
-  openModal({
-    title: "↗ " + t.shareCompTitle,
-    body: el("div", {}, [
-      el("p.page-sub", { style: "margin:0 0 14px", text: t.shareCompHint }),
-      qr,
-      el("div.field", { style: "margin-top:16px" }, [el("label", { text: t.competitionLink }), linkBox]),
-      el("div", { style: "display:flex;gap:8px" }, [copyBtn, shareBtn].filter(Boolean)),
-    ]),
-  });
+  shareCompetitionFlow(comp, tournament, u.href);
 }
 
 // ---- تبويب خروج المغلوب (إدارة) --------------------------------------------
