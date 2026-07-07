@@ -1081,6 +1081,46 @@ export async function approvePredictor(predictorId) {
   await updateDoc(doc(requireDb(), "predictors", predictorId), { verified: true });
 }
 
+// تعديل بيانات مشارك بيد المنظّم: الاسم و«تسوية النقاط» في predictors،
+// والهاتف/البريد/العمر في predictorContacts (تُنشأ إن كانت ناقصة).
+export async function adminUpdateParticipant(comp, uid, { name, phone, email, age, pointsAdj }) {
+  const d = requireDb();
+  const id = predKey(comp.id, uid);
+  await updateDoc(doc(d, "predictors", id), clean({
+    name: String(name || "").trim().slice(0, 60),
+    points_adj: Math.max(-9999, Math.min(9999, Math.trunc(Number(pointsAdj) || 0))),
+  }));
+  const patch = {
+    phone: phone ? String(phone).trim().slice(0, 40) : null,
+    email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
+    age: (age == null || age === "") ? null : Math.trunc(Number(age)),
+  };
+  const ref = doc(d, "predictorContacts", id);
+  let snap = null;
+  try { snap = await getDoc(ref); } catch {}
+  if (snap && snap.exists()) {
+    const old = snap.data() || {};
+    // تغيير الرقم بيد المنظّم يُسقط شارة «موثّق» (تفرضه القواعد أيضاً)
+    if ((old.phone || null) !== patch.phone) patch.phone_verified = false;
+    await updateDoc(ref, clean(patch));
+  } else {
+    await setDoc(ref, clean({
+      competition_id: comp.id, tournament_id: comp.tournament_id, uid,
+      ...patch, phone_verified: false, created_at: Date.now(),
+    }));
+  }
+}
+
+// حذف مشارك بالكامل: توقّعاته ثم وثيقة تواصله ثم وثيقته (صلاحية المنظّم تفرضها القواعد)
+export async function deleteParticipant(comp, uid) {
+  const d = requireDb();
+  const id = predKey(comp.id, uid);
+  const preds = await fetchMyPredictions(comp.id, uid);
+  await batchOp(preds.map((p) => doc(d, "predictions", p.id)), (b, ref) => b.delete(ref));
+  try { await deleteDoc(doc(d, "predictorContacts", id)); } catch (e) { console.warn(e); }  // قد لا توجد وثيقة تواصل
+  await deleteDoc(doc(d, "predictors", id));
+}
+
 // تعديل اسم المشارك ووثيقة تواصله
 export async function updateMyPredictor(comp, uid, { name, phone, email, age }) {
   const id = predKey(comp.id, uid);
@@ -1178,11 +1218,12 @@ export function predictionPoints(pred, match, cfg) {
 }
 
 // جدول ترتيب المتوقّعين — يجمع النقاط عبر المباريات المنتهية لكل مشارك
+// (نبدأ من «تسوية النقاط» points_adj إن وضعها المنظّم: مكافأة أو خصم يدوي)
 export function computePredictionStandings(predictors, predictions, matches, comp) {
   const cfg = compScoring(comp);
   const matchById = new Map(matches.map((m) => [m.id, m]));
   const rows = new Map();
-  for (const p of predictors) rows.set(p.uid, { predictor: p, points: 0, exact: 0, hits: 0, scored: 0, predicted: 0 });
+  for (const p of predictors) rows.set(p.uid, { predictor: p, points: Math.trunc(p.points_adj || 0), exact: 0, hits: 0, scored: 0, predicted: 0 });
   for (const pred of predictions) {
     const row = rows.get(pred.uid);
     if (!row) continue;                                   // توقّع بلا تسجيل — نتجاهله

@@ -854,10 +854,16 @@ async function removeCompetition(c) {
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
-// قائمة المشاركين مع بيانات التواصل والنقاط (للمنظّم فقط)
+// قائمة المشاركين مع بيانات التواصل والنقاط (للمنظّم فقط) + تعديل/حذف/اعتماد
 async function participantsModal(comp, tournament) {
   const body = el("div", {}, [spinner()]);
   openModal({ title: "👥 " + t.participantsTitle, body });
+  await loadParticipants(body, comp, tournament);
+}
+
+async function loadParticipants(body, comp, tournament) {
+  mount(body, spinner());
+  const reload = () => loadParticipants(body, comp, tournament);
   try {
     // بيانات التواصل قد تفشل (قواعد لم تُنشر بعد/صلاحية ناقصة) — نُظهر الجدول بدونها بدل فشل كامل
     const [predictors, contacts, predictions, bundle] = await Promise.all([
@@ -890,7 +896,7 @@ async function participantsModal(comp, tournament) {
       return wrap;
     };
 
-    const table = el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:520px" }, [
+    const table = el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:560px" }, [
       el("thead", {}, [el("tr", {}, [
         el("th.rank-col", { text: "#" }),
         el("th.team-col", { text: t.regName }),
@@ -898,6 +904,7 @@ async function participantsModal(comp, tournament) {
         el("th", { text: t.email }),
         el("th.stat-col", { text: t.th_age }),
         el("th.pts-col", { text: t.th_pts_total }),
+        el("th", { text: "" }),
       ])]),
       el("tbody", {}, standings.map((r) => {
         const c = contactByUid.get(r.predictor.uid) || {};
@@ -905,12 +912,22 @@ async function participantsModal(comp, tournament) {
           el("td", {}, [el("span.rank", { text: String(r.rank) })]),
           el("td.team-col", {}, [
             el("span.team-name", { text: r.predictor.name || "—" }),
+            (r.predictor.points_adj ? el("span", { style: "font-size:.75rem;color:var(--text-3);margin-inline-start:6px", text: `(± ${r.predictor.points_adj})` }) : null),
             r.predictor.verified === false ? pendingCell(r.predictor) : null,
           ]),
           el("td", { style: "direction:ltr;text-align:start", text: (c.phone || "—") + (c.phone_verified ? " ✓" : "") }),
           el("td", { style: "direction:ltr;text-align:start;font-size:.8rem", text: c.email || "—" }),
           el("td", { text: c.age != null ? String(c.age) : "—" }),
           el("td", {}, [el("span.pts", { text: String(r.points) })]),
+          el("td", {}, [el("div", { style: "display:flex;gap:4px" }, [
+            el("button.icon-btn", { text: "✎", title: t.editParticipant,
+              onclick: () => participantEditForm(comp, r, contactByUid.get(r.predictor.uid) || null, reload) }),
+            el("button.icon-btn", { text: "🗑", title: t.deleteParticipant, onclick: async () => {
+              if (!(await confirmDialog(`${t.deleteParticipantQ} (${r.predictor.name || "—"})`))) return;
+              try { await api.deleteParticipant(comp, r.predictor.uid); toast(t.participantDeleted, "ok"); reload(); }
+              catch (e) { toast(e.message || t.errorGeneric, "err"); }
+            } }),
+          ])]),
         ]);
       })),
     ])]);
@@ -937,6 +954,54 @@ async function participantsModal(comp, tournament) {
   } catch (e) {
     mount(body, el("div.alert.alert-error", { text: e.message || t.errorGeneric }));
   }
+}
+
+// نموذج تعديل مشارك بيد المنظّم: اسم/هاتف/بريد/عمر + «تسوية النقاط» (±)
+function participantEditForm(comp, row, contact, onSaved) {
+  const p = row.predictor;
+  const nameI = el("input.input", { type: "text", maxlength: "60", value: p.name || "" });
+  const phoneI = el("input.input", { type: "tel", maxlength: "40", value: contact?.phone || "", style: "direction:ltr;text-align:end" });
+  const emailI = el("input.input", { type: "email", maxlength: "120", value: contact?.email || "", style: "direction:ltr;text-align:end" });
+  const ageI = el("input.input", { type: "number", min: "3", max: "120", inputmode: "numeric", value: contact?.age ?? "" });
+  const adjI = el("input.input", { type: "number", min: "-9999", max: "9999", inputmode: "numeric", value: String(p.points_adj ?? 0), style: "direction:ltr;text-align:end" });
+  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
+
+  const body = el("div", {}, [
+    el("div.field", {}, [el("label", { text: t.regName }), nameI]),
+    el("div.field", {}, [el("label", { text: t.regPhone }), phoneI,
+      contact?.phone_verified ? el("div.field-hint", { text: "✓ " + t.phoneVerifiedMark + " — " + t.phoneEditDropsBadge }) : null]),
+    el("div.field", {}, [el("label", { text: t.regEmail }), emailI]),
+    el("div.field", {}, [el("label", { text: t.regAge }), ageI]),
+    el("div.field", {}, [el("label", { text: t.pointsAdjLbl }), adjI,
+      el("div.field-hint", { text: t.pointsAdjHint.replace("{pts}", String(row.points)) })]),
+    err,
+  ]);
+
+  let busy = false;
+  async function submit() {
+    if (busy) return;
+    err.hidden = true;
+    const name = nameI.value.trim();
+    if (!name) { err.hidden = false; err.textContent = t.regNameShort; return; }
+    const adjRaw = parseInt(adjI.value, 10);
+    const pointsAdj = Number.isFinite(adjRaw) ? adjRaw : 0;
+    busy = true;
+    try {
+      await api.adminUpdateParticipant(comp, p.uid, {
+        name, phone: phoneI.value.trim(), email: emailI.value.trim(), age: ageI.value.trim(), pointsAdj,
+      });
+      close(); toast(t.participantSaved, "ok"); onSaved();
+    } catch (e) { busy = false; err.hidden = false; err.textContent = e.message || t.errorGeneric; }
+  }
+
+  const close = openModal({
+    title: "✎ " + t.editParticipant,
+    body,
+    footer: [
+      el("button.btn.btn-primary", { type: "button", text: t.save, onclick: submit }),
+      el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close() }),
+    ],
+  });
 }
 
 // مشاركة رابط المسابقة (نسخ + مشاركة أصليّة + رمز QR)

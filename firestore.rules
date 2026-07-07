@@ -366,42 +366,69 @@ service cloud.firestore {
         && predictorValuesOk(request.resource.data)
         && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
       // صاحبه يعدّل اسمه فقط · مدير المنصّة يعتمد المشارك المنتظر (verified → true)
+      // · منظّم التورنير يعدّل الاسم و«تسوية النقاط» (points_adj تُضاف لمجموع نقاطه)
       allow update: if (isSelf(resource.data.uid)
           && changedKeys().hasOnly(['name'])
           && okStr(request.resource.data.get('name', ''), 60))
         || (isPlatformAdmin()
           && changedKeys().hasOnly(['verified'])
-          && request.resource.data.verified == true);
+          && request.resource.data.verified == true)
+        || (parentManages(resource.data.tournament_id)
+          && changedKeys().hasOnly(['name', 'points_adj'])
+          && okStr(request.resource.data.get('name', ''), 60)
+          && (!('points_adj' in request.resource.data)
+              || (request.resource.data.points_adj is int
+                  && request.resource.data.points_adj >= -9999
+                  && request.resource.data.points_adj <= 9999)));
       allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
     }
 
     // ---- تواصل المتوقّع (هاتف/بريد/عمر) — خاصّ: يقرؤه صاحبه أو منظّم التورنير ----
-    function contactValuesOk(d) {
+    // فحوص الأنواع والأطوال فقط (الهاتف/البريد اختياريان — مشارك «قيد الموافقة» قد لا يملكهما)
+    function contactFieldsOk(d) {
       return d.get('competition_id', '') is string
         && d.get('tournament_id', '') is string
         && d.get('uid', '') is string
-        // الهاتف/البريد اختياريان (مشارك «قيد موافقة الإدارة» قد لا يملك أيّاً منهما)
         && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() >= 3 && d.phone.size() <= 40))
         && (!('email' in d) || d.email == null || (d.email is string && d.email.size() >= 3 && d.email.size() <= 120))
         && (!('age' in d) || d.age == null || (d.age is int && d.age >= 3 && d.age <= 120))
         && (!('phone_verified' in d) || d.phone_verified is bool)
-        // «هاتف موثّق» لا يُدَّعى: يُقبل true فقط إن طابق الرقمُ هاتفَ الحساب الموثّق (OTP)
-        && (d.get('phone_verified', false) == false
-            || (request.auth != null
-                && request.auth.token.get('phone_number', '') == d.get('phone', '')))
         && okOptNum(d, 'created_at');
+    }
+    // «هاتف موثّق» لا يُدَّعى: يُقبل true فقط إن طابق الرقمُ هاتفَ الحساب الموثّق (OTP)
+    function phoneClaimOk(d) {
+      return d.get('phone_verified', false) == false
+        || (request.auth != null
+            && request.auth.token.get('phone_number', '') == d.get('phone', ''));
+    }
+    function contactKeys() {
+      return ['competition_id', 'tournament_id', 'uid', 'phone', 'email', 'age', 'phone_verified', 'created_at'];
     }
     match /predictorContacts/{id} {
       // isPlatformAdmin أولاً: شرط بلا اعتماد على الوثيقة — يجعل استعلامات القائمة
       // قابلة للإثبات لمدير المنصّة مباشرة (قواعد القوائم تُقيَّم من شكل الاستعلام)
       allow read: if isPlatformAdmin() || isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
-      allow create: if isSelf(request.resource.data.uid)
-        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'phone', 'email', 'age', 'phone_verified', 'created_at'])
-        && contactValuesOk(request.resource.data)
-        && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
-      allow update: if isSelf(resource.data.uid)
-        && changedKeys().hasOnly(['phone', 'email', 'age', 'phone_verified'])
-        && contactValuesOk(request.resource.data);
+      // صاحبها عند الانضمام · أو المنظّم يستكمل وثيقة ناقصة لمشارك (بلا ادّعاء توثيق)
+      allow create: if (isSelf(request.resource.data.uid)
+          && request.resource.data.keys().hasOnly(contactKeys())
+          && contactFieldsOk(request.resource.data)
+          && phoneClaimOk(request.resource.data)
+          && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id))
+        || (parentManages(request.resource.data.tournament_id)
+          && request.resource.data.keys().hasOnly(contactKeys())
+          && contactFieldsOk(request.resource.data)
+          && request.resource.data.get('phone_verified', false) == false);
+      // صاحبها يعدّلها (مع شرط التوثيق) · المنظّم يعدّلها لكن لا يمنح «موثّق» —
+      // وتغيير الرقم يُلزمه إسقاط شارة التوثيق (يفعله الكود تلقائياً)
+      allow update: if (isSelf(resource.data.uid)
+          && changedKeys().hasOnly(['phone', 'email', 'age', 'phone_verified'])
+          && contactFieldsOk(request.resource.data)
+          && phoneClaimOk(request.resource.data))
+        || (parentManages(resource.data.tournament_id)
+          && changedKeys().hasOnly(['phone', 'email', 'age', 'phone_verified'])
+          && contactFieldsOk(request.resource.data)
+          && (!changed('phone_verified') || request.resource.data.phone_verified == false)
+          && (!changed('phone') || request.resource.data.get('phone_verified', false) == false));
       allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
     }
 
