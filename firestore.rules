@@ -313,11 +313,7 @@ service cloud.firestore {
         )
         || (isOwner()
           && changedKeys().hasOnly(['approved'])
-          && request.resource.data.approved is bool)
-        || (isOwner()
-          && request.resource.data.keys().hasOnly(userKeys())
-          && changedKeys().hasOnly(['username'])
-          && userValuesOk(request.resource.data));
+          && request.resource.data.approved is bool);
       allow delete: if isOwner();
     }
 
@@ -336,11 +332,10 @@ service cloud.firestore {
       }
       allow create: if usernameReservationOk()
         && !exists(/databases/$(database)/documents/usernames/$(username))
-        && ((request.auth != null
-            && request.resource.data.uid == request.auth.uid
-            && request.resource.data.auth_email == request.auth.token.email.lower())
-          || isOwner());
-      allow update: if isOwner() && usernameReservationOk();
+        && request.auth != null
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.auth_email == request.auth.token.email.lower();
+      allow update: if false;
       allow delete: if isOwner();
     }
 

@@ -612,9 +612,6 @@ async function renderUsersAdmin() {
         if (em) actions.push(adminSet.has(em)
           ? el("button.btn.btn-sm.btn-danger", { text: t.removeAdminRole, onclick: () => toggleAdmin(u, false) })
           : el("button.btn.btn-sm.btn-outline", { text: t.makeAdmin, onclick: () => toggleAdmin(u, true) }));
-        if (em && usernameFromEmailLocal(em) && usernameFromEmailLocal(em) !== u.username) {
-          actions.push(el("button.btn.btn-sm.btn-outline", { text: t.fixUsername, onclick: () => fixUserUsername(u) }));
-        }
         actions.push(el("button.btn.btn-sm.btn-danger", { text: t.delete, onclick: () => removeUser(u) }));
       }
       list.appendChild(el("div.admin-list-item", {}, [
@@ -651,18 +648,6 @@ async function toggleUserApproval(u, on) {
   if (!on && !(await confirmDialog(`إلغاء اعتماد «${u.username || u.name}»؟`))) return;
   try { await api.setUserApproved(u.id, on); toast(t.saved, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
-}
-
-function usernameFromEmailLocal(email) {
-  return String(email || "").split("@")[0].toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-").slice(0, 24).replace(/-+$/g, "");
-}
-
-async function fixUserUsername(u) {
-  const next = usernameFromEmailLocal(u.email);
-  if (!next) return;
-  if (!(await confirmDialog(`تغيير اسم المستخدم من «${u.username || ""}» إلى «${next}»؟`))) return;
-  try { await api.resetUserUsernameToEmail(u); toast(t.saved, "ok"); route(); }
-  catch (e) { toast(authMsg(e, e.message || t.errorGeneric), "err"); }
 }
 
 async function removeUser(u) {
