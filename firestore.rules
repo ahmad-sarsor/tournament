@@ -31,24 +31,40 @@ service cloud.firestore {
         ? request.auth.token.email.lower() : null;
     }
     function isOwner() { return uemail() != null && uemail() in ownerEmails(); }
-    function isPlatformAdmin() {
-      return isOwner()
-        || (uemail() != null && exists(/databases/$(database)/documents/admins/$(uemail())));
-    }
     function userDoc(uid) {
       return get(/databases/$(database)/documents/users/$(uid)).data;
     }
-    function approvedUser() {
+    function hasUserDoc() {
       return request.auth != null
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && userDoc(request.auth.uid).get('approved', false) == true;
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
     }
+    // غير محظور — «التبنيد» بيد المالك وحده من لوحة المستخدمين (banned على وثيقة users)
+    function notBanned() {
+      return !hasUserDoc() || userDoc(request.auth.uid).get('banned', false) != true;
+    }
+    // حساب منصّة فعّال فور التسجيل (وثيقة users موجودة وغير محظور) — لا انتظار موافقة
+    function platformUser() { return hasUserDoc() && notBanned(); }
     function activeAccount() {
-      return uemail() != null || approvedUser();
+      return (uemail() != null && notBanned()) || platformUser();
     }
+    // اسم المستخدم الحالي من وثيقته — لصلاحيات ممنوحة بالاسم (طاقم/أعضاء/مدراء)
+    function myUname() {
+      return (hasUserDoc()
+              && userDoc(request.auth.uid).get('username', '') is string
+              && userDoc(request.auth.uid).get('username', '') != '')
+        ? userDoc(request.auth.uid).username : 'zz-none';
+    }
+    function isPlatformAdmin() {
+      return isOwner()
+        || (uemail() != null && exists(/databases/$(database)/documents/admins/$(uemail())))
+        || (platformUser() && exists(/databases/$(database)/documents/admins/$(myUname())));
+    }
+    // عضو معتمَد (يُنشئ تورنيرات): منحة من المالك حصراً — الحساب الفعّال العادي
+    // يشاهد كل شيء ويشارك في المسابقات لكنه لا يُنشئ بطولات
     function isMember() {
-      return isPlatformAdmin() || activeAccount()
-        || (uemail() != null && exists(/databases/$(database)/documents/members/$(uemail())));
+      return isPlatformAdmin()
+        || (uemail() != null && exists(/databases/$(database)/documents/members/$(uemail())))
+        || (platformUser() && exists(/databases/$(database)/documents/members/$(myUname())));
     }
 
     // مالك التورنير (d = بيانات التورنير)
@@ -56,15 +72,17 @@ service cloud.firestore {
       return (request.auth != null && d.get('owner_uid', '') == request.auth.uid)
         || (uemail() != null && d.get('owner_email', '').lower() == uemail());
     }
-    // إدارة تورنير: منصّة، أو مالكه، أو مدير معيّن فيه
+    // إدارة تورنير: منصّة، أو مالكه، أو مدير معيّن فيه (بالبريد أو باسم المستخدم)
     function canManageT(d) {
       return isPlatformAdmin() || isTOwner(d)
-        || (uemail() != null && uemail() in d.get('admin_emails', []));
+        || (uemail() != null && uemail() in d.get('admin_emails', []))
+        || (platformUser() && myUname() in d.get('admin_emails', []));
     }
-    // تسجيل نتائج: كل من يدير + المسجّلون المعيَّنون
+    // تسجيل نتائج: كل من يدير + المسجّلون المعيَّنون (بالبريد أو باسم المستخدم)
     function canScoreT(d) {
       return canManageT(d)
-        || (uemail() != null && uemail() in d.get('scorer_emails', []));
+        || (uemail() != null && uemail() in d.get('scorer_emails', []))
+        || (platformUser() && myUname() in d.get('scorer_emails', []));
     }
     function tData(tid) {
       return get(/databases/$(database)/documents/tournaments/$(tid)).data;
@@ -278,9 +296,12 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ---- المسجّلون: بريد مؤكّد أو اسم مستخدم بلا بريد بانتظار موافقة المالك ----
+    // ---- المسجّلون: حساب فعّال فور التسجيل (اسم مستخدم + كلمة مرور، الهاتف اختياري) ----
+    //  banned: يضعه المالك وحده (تبنيد). device_id: بصمة جهاز محلية تكشف تعدّد
+    //  الحسابات من نفس المتصفّح — علامة للمالك، لا حظر آليّ.
     function userKeys() {
-      return ['email', 'auth_email', 'username', 'name', 'created_at', 'verified', 'approved', 'no_email'];
+      return ['email', 'auth_email', 'username', 'name', 'phone', 'device_id',
+              'created_at', 'verified', 'approved', 'no_email', 'banned'];
     }
     function userValuesOk(d) {
       return d.get('email', '') is string && d.get('email', '').size() <= 254
@@ -290,9 +311,12 @@ service cloud.firestore {
           && d.username.size() >= 3
           && d.username.size() <= 24))
         && okStr(d.get('name', ''), 60)
+        && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() <= 40))
+        && (!('device_id' in d) || d.device_id == null || (d.device_id is string && d.device_id.size() <= 80))
         && d.get('verified', false) is bool
         && d.get('approved', false) is bool
         && d.get('no_email', false) is bool
+        && d.get('banned', false) is bool
         && okOptNum(d, 'created_at');
     }
     match /users/{userId} {
@@ -302,18 +326,19 @@ service cloud.firestore {
         && userValuesOk(request.resource.data)
         && request.resource.data.get('username', '') is string
         && request.resource.data.auth_email == request.auth.token.email.lower()
-        && request.resource.data.approved == (uemail() != null);
+        && request.resource.data.get('banned', false) == false;
+      // صاحبه يعدّل بياناته (لا يلمس banned) · المالك يحظر/يفكّ الحظر ويعتمد
       allow update: if (
           request.auth != null && request.auth.uid == userId
           && request.resource.data.keys().hasOnly(userKeys())
-          && changedKeys().hasOnly(['email', 'auth_email', 'name', 'verified', 'approved', 'no_email'])
+          && changedKeys().hasOnly(['email', 'auth_email', 'name', 'phone', 'device_id', 'verified', 'approved', 'no_email'])
           && userValuesOk(request.resource.data)
           && request.resource.data.auth_email == request.auth.token.email.lower()
-          && (!changed('approved') || (uemail() != null && request.resource.data.approved == true))
         )
         || (isOwner()
-          && changedKeys().hasOnly(['approved'])
-          && request.resource.data.approved is bool);
+          && changedKeys().hasOnly(['approved', 'banned'])
+          && request.resource.data.get('approved', false) is bool
+          && request.resource.data.get('banned', false) is bool);
       allow delete: if isOwner();
     }
 
@@ -340,8 +365,10 @@ service cloud.firestore {
     }
 
     // ---- الأعضاء المعتمَدون (يُنشئون تورنيرات) — المالك وحده يعتمد -------------
+    //  المفتاح addr: بريد بحروف صغيرة أو اسم مستخدم (المنح باسم المستخدم مدعوم)
     match /members/{addr} {
-      allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr);
+      allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr)
+        || (platformUser() && myUname() == addr);
       allow create, update: if isOwner()
         && addr == addr.lower()
         && request.resource.data.keys().hasOnly(['email', 'added_at'])
@@ -351,8 +378,10 @@ service cloud.firestore {
     }
 
     // ---- مدراء المنصّة (كل الصلاحيات) — المالك وحده يمنح ----------------------
+    //  المفتاح addr: بريد بحروف صغيرة أو اسم مستخدم
     match /admins/{addr} {
-      allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr);
+      allow read: if isPlatformAdmin() || (uemail() != null && uemail() == addr)
+        || (platformUser() && myUname() == addr);
       allow create, update: if isOwner()
         && addr == addr.lower()
         && request.resource.data.keys().hasOnly(['email', 'added_at'])

@@ -67,18 +67,18 @@ function goToPlatformAuth() {
 function openAccountRequiredModal() {
   const u = session?.user;
   const signed = isSignedPlatformUser(u);
-  const noEmail = signed && isNoEmailAuthEmail(u.email);
-  const title = !signed ? t.accountRequiredTitle : (noEmail ? t.approvalRequiredTitle : t.verifyAccountTitle);
-  const body = !signed ? t.accountRequiredBody : (noEmail ? t.approvalRequiredBody : t.verifyAccountBody);
+  // حساب اسم المستخدم فعّال فوراً — الحالتان الوحيدتان هنا: غير مسجَّل، أو بريد قديم لم يؤكَّد
+  const title = !signed ? t.accountRequiredTitle : t.verifyAccountTitle;
+  const body = !signed ? t.accountRequiredBody : t.verifyAccountBody;
   const close = openModal({
     title,
     body: el("div", {}, [
       el("p", { style: "margin:0 0 14px;color:var(--text-2);line-height:1.7", text: body }),
-      signed ? el("div", { style: "font-weight:800;direction:ltr;text-align:center;margin-bottom:12px", text: noEmail ? accountLabel(u) : (u.email || "") }) : null,
+      signed ? el("div", { style: "font-weight:800;direction:ltr;text-align:center;margin-bottom:12px", text: u.email || "" }) : null,
       el("button.btn.btn-primary.btn-block", {
         type: "button",
-        text: !signed ? t.loginToJoin : (noEmail ? t.okGotIt : t.verifyAccountBtn),
-        onclick: () => { close(); if (!noEmail) goToPlatformAuth(); },
+        text: !signed ? t.loginToJoin : t.verifyAccountBtn,
+        onclick: () => { close(); goToPlatformAuth(); },
       }),
     ]),
   });
@@ -86,7 +86,8 @@ function openAccountRequiredModal() {
 function contestAuthMsg(err) {
   if (err?.code === "auth/login-required") return t.accountRequiredError;
   if (err?.code === "auth/email-not-verified") return t.verifyBeforeJoin;
-  if (err?.code === "auth/approval-required") return t.approvalRequiredBody;
+  if (err?.code === "auth/banned") return t.bannedMsg;
+  if (err?.code === "permission-denied" || String(err?.message || "").includes("insufficient permissions")) return t.bannedOrRulesMsg;
   return err?.message || t.errorGeneric;
 }
 
@@ -774,11 +775,7 @@ function openRegisterModal(comp, state, isEdit, rerender) {
       el("input.input", { type: "text", value: shownName, disabled: true }),
       el("div.field-hint", { text: t.accountNameHint }),
     ]),
-    el("div.field", {}, [
-      el("label", { text: t.accountEmail }),
-      el("input.input", { type: "email", value: user.email || "", disabled: true, style: "direction:ltr;text-align:end;opacity:.75" }),
-    ]),
-    el("div.field", {}, [el("label", { text: t.regPhone }), phoneI, el("div.field-hint", { text: t.regContactHint })]),
+    el("div.field", {}, [el("label", { text: t.phoneOptionalLbl }), phoneI]),
     el("div.field", {}, [el("label", { text: t.regAge }), ageI]),
     err, submit,
     el("button", { type: "submit", hidden: true }),

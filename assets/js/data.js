@@ -58,16 +58,19 @@ export async function fetchMyTournaments(email) {
   if (!email && !u?.uid) return [];
   const d = requireDb();
   const low = (email && !isNoEmailAuthEmail(email)) ? String(email).toLowerCase() : "";
-  // كل العناوين مخزّنة بحروف صغيرة (owner_email من Firebase، والقائمتان من الواجهة)
+  // مفاتيح الطاقم: البريد و/أو اسم المستخدم (كلاهما مقبول في القوائم)
+  const uname = (currentUserDoc?.id === u?.uid && currentUserDoc?.username) ? currentUserDoc.username : "";
+  const staffKeys = [low, uname].filter(Boolean);
+  const none = Promise.resolve({ docs: [] });
   const jobs = [
-    low ? getDocs(query(collection(d, "tournaments"), where("owner_email", "==", low))) : Promise.resolve({ docs: [] }),
-    low ? getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", low))) : Promise.resolve({ docs: [] }),
-    low ? getDocs(query(collection(d, "tournaments"), where("scorer_emails", "array-contains", low))) : Promise.resolve({ docs: [] }),
-    u?.uid ? getDocs(query(collection(d, "tournaments"), where("owner_uid", "==", u.uid))) : Promise.resolve({ docs: [] }),
+    low ? getDocs(query(collection(d, "tournaments"), where("owner_email", "==", low))) : none,
+    u?.uid ? getDocs(query(collection(d, "tournaments"), where("owner_uid", "==", u.uid))) : none,
+    ...staffKeys.map((k) => getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", k)))),
+    ...staffKeys.map((k) => getDocs(query(collection(d, "tournaments"), where("scorer_emails", "array-contains", k)))),
   ];
-  const [owned, adminOf, scorerOf, ownedByUid] = await Promise.all(jobs);
+  const snaps = await Promise.all(jobs);
   const byId = new Map();
-  for (const doc of [...mapDocs(owned), ...mapDocs(adminOf), ...mapDocs(scorerOf), ...mapDocs(ownedByUid)]) byId.set(doc.id, doc);
+  for (const s of snaps) for (const doc of mapDocs(s)) byId.set(doc.id, doc);
   return [...byId.values()].sort(byTournamentOrder);
 }
 
@@ -286,8 +289,22 @@ export async function signIn(identifier, password) {
   return { user: cred.user };
 }
 
-// تسجيل جديد: إنشاء حساب + رسالة تأكيد البريد + وثيقة في users (تظهر لمانحي الصلاحيات)
-export async function signUp(email, password, username, personName) {
+// معرّف جهاز محلي — يكشف تعدّد الحسابات من نفس المتصفّح (علامة للمالك، ليس حظراً آلياً)
+export function deviceId() {
+  try {
+    let d = localStorage.getItem("tp_device");
+    if (!d) { d = Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("tp_device", d); }
+    return d;
+  } catch { return null; }
+}
+
+// حظر/فكّ حظر مستخدم — للمالك فقط (تفرضه القواعد). المحظور لا يشارك في المسابقات.
+export async function setUserBanned(uid, on) {
+  await updateDoc(doc(requireDb(), "users", uid), { banned: !!on });
+}
+
+// تسجيل جديد: اسم مستخدم + كلمة مرور (+هاتف اختياري) — الحساب فعّال فوراً
+export async function signUp(email, password, username, personName, phone) {
   const realEmail = String(email || "").trim().toLowerCase();
   const uname = normalizeUsername(username);
   const displayName = String(personName || "").trim().slice(0, 60) || uname;
@@ -317,16 +334,18 @@ export async function signUp(email, password, username, personName) {
     try { await sendEmailVerification(cred.user); } catch (e) { console.warn(e); }
   }
   const d = requireDb();
-  const base = {
+  const base = clean({
     email: realEmail,
     auth_email: addr.toLowerCase(),
     username: uname,
     name: displayName,
+    phone: phone ? String(phone).trim().slice(0, 40) : null,
+    device_id: deviceId() || undefined,
     created_at: Date.now(),
     verified: !!(realEmail && cred.user.emailVerified),
-    approved: !realEmail ? false : !!cred.user.emailVerified,
+    approved: true,                 // فعّال فوراً — لا انتظار موافقة المالك
     no_email: !realEmail,
-  };
+  });
   try {
     const b = writeBatch(d);
     b.set(doc(d, "users", cred.user.uid), clean(base));
@@ -483,19 +502,27 @@ async function hasDoc(coll, id) {
   catch { return false; }
 }
 
-// مدير منصّة: المالك دائماً، أو بريده في admins (صلاحيات على كل التورنيرات)
+// مدير منصّة: المالك دائماً، أو بريده/اسم مستخدمه في admins (صلاحيات على كل التورنيرات)
 export async function amIPlatformAdmin() {
   const u = currentUser;
-  if (!u || !u.email || isNoEmailAuthEmail(u.email) || !u.emailVerified) return false;
-  return isOwnerEmail(u.email) || hasDoc("admins", u.email.toLowerCase());
+  if (!u || u.isAnonymous) return false;
+  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) {
+    if (isOwnerEmail(u.email) || await hasDoc("admins", u.email.toLowerCase())) return true;
+  }
+  const docu = await fetchMyUserDoc(u.uid);
+  return !!(docu?.username && await hasDoc("admins", docu.username));
 }
 
-// حساب فعّال: بريد مؤكّد تلقائياً أو حساب بلا بريد وافق عليه المالك.
+// عضو معتمَد (يُنشئ تورنيرات): منحة من المالك حصراً — بريده أو اسم مستخدمه في members.
+// المشترك العادي يشاهد كل شيء ويشارك في المسابقات لكنه لا يُنشئ بطولات.
 export async function isInMembers() {
   const u = currentUser;
   if (!u || u.isAnonymous) return false;
-  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return true;
-  return (await fetchMyUserDoc(u.uid))?.approved === true;
+  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) {
+    if (await hasDoc("members", u.email.toLowerCase())) return true;
+  }
+  const docu = await fetchMyUserDoc(u.uid);
+  return !!(docu?.username && await hasDoc("members", docu.username));
 }
 
 export async function fetchUsers() {
@@ -1054,8 +1081,10 @@ export function subscribeTournament(tid, onChange) {
 
 function isPlatformAccount(u) {
   if (!u || u.isAnonymous) return false;
+  if (currentUserDoc?.id === u.uid && currentUserDoc.banned === true) return false;  // محظور
   if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return true;
-  return currentUserDoc?.id === u.uid && currentUserDoc.approved === true;
+  // حساب اسم مستخدم: فعّال فور التسجيل (وثيقة users موجودة) — لا انتظار موافقة
+  return currentUserDoc?.id === u.uid;
 }
 
 function accountName(u) {
@@ -1069,10 +1098,11 @@ export async function requirePlatformUser() {
   const u = auth.currentUser;
   if (u && (!currentUserDoc || currentUserDoc.id !== u.uid)) await fetchMyUserDoc(u.uid);
   if (isPlatformAccount(u)) return u;
-  const err = new Error("يجب تسجيل الدخول بحساب منصة مؤكَّد للمشاركة");
-  err.code = u && !u.isAnonymous
-    ? (u.email && !isNoEmailAuthEmail(u.email) ? "auth/email-not-verified" : "auth/approval-required")
-    : "auth/login-required";
+  const err = new Error("يجب تسجيل الدخول بحساب منصة للمشاركة");
+  err.code = !u || u.isAnonymous ? "auth/login-required"
+    : (currentUserDoc?.id === u?.uid && currentUserDoc?.banned === true ? "auth/banned"
+      : (u.email && !isNoEmailAuthEmail(u.email) && !u.emailVerified ? "auth/email-not-verified"
+        : "auth/login-required"));
   throw err;
 }
 
