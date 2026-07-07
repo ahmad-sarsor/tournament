@@ -655,10 +655,15 @@ async function renderPredictionsAdmin(host, state) {
   if (!comps.length) wrap.appendChild(emptyState("🎯", t.noCompetitions));
 
   for (const c of comps) {
-    // عدّاد مشاركين حيّ على البطاقة — يُملأ فور جلب المتوقّعين (للمنظّم نظرة سريعة)
+    // عدّاد مشاركين حيّ على البطاقة (+ المنتظرين للاعتماد) — يُملأ فور جلب المتوقّعين
     const cnt = el("div.pc-adm-sub", { text: "👥 …" });
     api.fetchPredictors(c.id)
-      .then((list) => { cnt.textContent = `👥 ${t.compParticipants}: ${list.length}`; })
+      .then((list) => {
+        const pending = list.filter((p) => p.verified === false).length;
+        cnt.textContent = `👥 ${t.compParticipants}: ${list.length}`
+          + (pending ? ` · ⏳ ${t.pendingCountLbl}: ${pending}` : "");
+        if (pending) cnt.style.color = "var(--loss)";
+      })
       .catch(() => { cnt.textContent = ""; });
     wrap.appendChild(el("div.pc-adm-card" + (c.status === "open" ? ".is-open" : ""), {}, [
       el("div.pc-adm-cardhead", {}, [
@@ -862,6 +867,26 @@ async function participantsModal(comp, tournament) {
     const standings = api.computePredictionStandings(predictors, predictions, bundle.matches, comp);
     if (!standings.length) { mount(body, emptyState("👥", t.noParticipants)); return; }
 
+    // شارة «بانتظار الموافقة» + زر اعتماد (لمدير المنصّة — القواعد تفرض ذلك)
+    const pendingCell = (p) => {
+      const wrap = el("div", { style: "display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap" }, [
+        el("span.badge.badge-upcoming", { text: "⏳ " + t.pendingCountLbl }),
+      ]);
+      if (isPlatformAdminUser) {
+        const b = el("button.btn.btn-sm.btn-primary", { type: "button", text: "✓ " + t.approveBtn });
+        b.addEventListener("click", async () => {
+          b.disabled = true;
+          try {
+            await api.approvePredictor(p.id);
+            toast(t.approvedDone, "ok");
+            wrap.replaceWith(el("span.badge.badge-active", { text: "✓ " + t.approvedDone }));
+          } catch (e) { b.disabled = false; toast(e.message || t.errorGeneric, "err"); }
+        });
+        wrap.appendChild(b);
+      }
+      return wrap;
+    };
+
     const table = el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:520px" }, [
       el("thead", {}, [el("tr", {}, [
         el("th.rank-col", { text: "#" }),
@@ -875,7 +900,10 @@ async function participantsModal(comp, tournament) {
         const c = contactByUid.get(r.predictor.uid) || {};
         return el("tr" + (r.rank === 1 ? ".champion" : ""), {}, [
           el("td", {}, [el("span.rank", { text: String(r.rank) })]),
-          el("td.team-col", {}, [el("span.team-name", { text: r.predictor.name || "—" })]),
+          el("td.team-col", {}, [
+            el("span.team-name", { text: r.predictor.name || "—" }),
+            r.predictor.verified === false ? pendingCell(r.predictor) : null,
+          ]),
           el("td", { style: "direction:ltr;text-align:start", text: (c.phone || "—") + (c.phone_verified ? " ✓" : "") }),
           el("td", { style: "direction:ltr;text-align:start;font-size:.8rem", text: c.email || "—" }),
           el("td", { text: c.age != null ? String(c.age) : "—" }),

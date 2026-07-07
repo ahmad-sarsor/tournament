@@ -16,6 +16,7 @@ import {
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
   RecaptchaVerifier, PhoneAuthProvider, signInWithPhoneNumber, linkWithPhoneNumber,
   signInWithCredential, linkWithCredential,
+  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
 
@@ -956,6 +957,56 @@ export async function confirmPhoneCode(confirmation, code) {
   }
 }
 
+// ---- توثيق البريد برابط (Email Link) للمتوقّعين ------------------------------
+//  بديل توثيق الهاتف: نرسل رابط دخول لبريد المشارك؛ الضغط عليه يعيده للصفحة
+//  ويوثّق بريده (email_verified=true) ويكمل تسجيله تلقائياً.
+//  التفعيل: Authentication → Sign-in method → Email/Password → «Email link».
+
+const EMAIL_LINK_KEY = "tp_email_link_reg";   // مسودّة التسجيل بانتظار الضغط على الرابط
+
+export async function sendContestEmailLink(email, draft) {
+  if (!auth) throw new Error("Firebase not configured");
+  auth.languageCode = "ar";
+  // نعود لنفس صفحة المسابقة — الرابط يكمل التسجيل تلقائياً
+  const settings = { url: location.href, handleCodeInApp: true };
+  await sendSignInLinkToEmail(auth, String(email || "").trim(), settings);
+  try { localStorage.setItem(EMAIL_LINK_KEY, JSON.stringify({ email: String(email).trim(), draft, ts: Date.now() })); } catch {}
+}
+
+// هل فُتحت الصفحة من رابط توثيق بريد؟
+export function pendingEmailLink() {
+  try { return !!auth && isSignInWithEmailLink(auth, location.href); } catch { return false; }
+}
+
+// إكمال الدخول من الرابط. يعيد { user, draft } أو { needEmail: true } إن فُتح
+// الرابط على جهاز آخر (لا مسودّة محفوظة) — فتطلب الواجهة البريد للتأكيد.
+export async function completeEmailLink(emailOverride) {
+  if (!pendingEmailLink()) return null;
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(EMAIL_LINK_KEY) || "null"); } catch {}
+  const email = String(emailOverride || saved?.email || "").trim();
+  if (!email) return { needEmail: true };
+  const link = location.href;
+  let user;
+  const cur = auth.currentUser;
+  try {
+    if (cur && !cur.email) {
+      // ربط البريد بالحساب القائم (مجهول/هاتفي) — نفس uid فلا تضيع المشاركة
+      user = (await linkWithCredential(cur, EmailAuthProvider.credentialWithLink(email, link))).user;
+    } else {
+      user = (await signInWithEmailLink(auth, email, link)).user;
+    }
+  } catch (e) {
+    if (e?.code === "auth/credential-already-in-use" || e?.code === "auth/email-already-in-use") {
+      user = (await signInWithEmailLink(auth, email, link)).user;   // البريد لحساب قائم → ندخل إليه
+    } else throw e;
+  }
+  try { localStorage.removeItem(EMAIL_LINK_KEY); } catch {}
+  // تنظيف العنوان من معاملات الرابط (oobCode وأخواتها)
+  try { history.replaceState(null, "", location.pathname + location.hash); } catch {}
+  return { user, draft: saved?.draft || null };
+}
+
 // ---- المسابقات (pcomps) ----------------------------------------------------
 
 const compDefaults = () => ({ pts_exact: 5, pts_diff: 3, pts_outcome: 2, winners_count: 3, predictions_open: false });
@@ -999,21 +1050,30 @@ export async function registerPredictor(comp, { name, phone, email, age }) {
   // إن وثّق هاتفه بـ OTP نخزّن الرقم الموثّق نفسه (القواعد تشترط تطابقه مع التوكن)
   const tokenPhone = user.phoneNumber || null;
   const phoneStr = tokenPhone || (phone ? String(phone).trim().slice(0, 40) : null);
+  // موثّق = هاتف OTP أو بريد مؤكَّد على التوكن؛ غير ذلك = «قيد موافقة الإدارة»
+  const verified = !!(tokenPhone || (user.email && user.emailVerified));
   // كتابة ذرّية: إمّا الوثيقتان معاً (اسم عامّ + تواصل خاصّ) أو لا شيء — لا حالة نصفيّة
   const d = requireDb();
   const b = writeBatch(d);
   b.set(doc(d, "predictors", id), clean({
-    ...base, name: String(name || "").trim().slice(0, 60),
+    ...base, name: String(name || "").trim().slice(0, 60), verified,
   }));
   b.set(doc(d, "predictorContacts", id), clean({
     ...base,
     phone: phoneStr,
     phone_verified: !!tokenPhone,
-    email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
+    email: (user.email && user.emailVerified)
+      ? user.email.toLowerCase()
+      : (email ? String(email).trim().toLowerCase().slice(0, 120) : null),
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
   await b.commit();
-  return { id, uid, name };
+  return { id, uid, name, verified };
+}
+
+// اعتماد مشارك «قيد الموافقة» — لمدير المنصّة فقط (تفرضه القواعد)
+export async function approvePredictor(predictorId) {
+  await updateDoc(doc(requireDb(), "predictors", predictorId), { verified: true });
 }
 
 // تعديل اسم المشارك ووثيقة تواصله

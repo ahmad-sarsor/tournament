@@ -334,13 +334,24 @@ service cloud.firestore {
       allow delete: if parentManages(resource.data.tournament_id);
     }
 
-    // ---- المتوقّعون: اسم عامّ (للترتيب) — أي مستخدم (ولو مجهول) يسجّل نفسه ------
+    // ---- المتوقّعون: اسم عامّ (للترتيب) — المشاركة مشروطة بهويّة موثّقة ---------
+    //  verified إلزامي عند التسجيل:
+    //   • true  = هويّة موثّقة على التوكن (هاتف OTP أو بريد مؤكَّد بالرابط) فقط.
+    //   • false = «قيد موافقة الإدارة» (بلا هاتف/بريد) — لا يُقبل توقّعه حتى
+    //     يعتمده مدير المنصّة (verified → true).
+    //  الوثائق القديمة بلا الحقل تُعامل كموثَّقة (توافق رجعي).
     function predictorValuesOk(d) {
       return okStr(d.get('name', ''), 60)
         && d.get('competition_id', '') is string
         && d.get('tournament_id', '') is string
         && d.get('uid', '') is string
         && okOptNum(d, 'created_at');
+    }
+    // هويّة موثّقة على توكن المصادقة: هاتف OTP أو بريد مؤكَّد
+    function tokenVerified() {
+      return request.auth != null
+        && (request.auth.token.get('phone_number', '') != ''
+            || request.auth.token.get('email_verified', false) == true);
     }
     // التسجيل متاح فقط والمسابقة «مفتوحة»، وضمن نفس التورنير
     function joinOpen(cid, tid) {
@@ -349,12 +360,18 @@ service cloud.firestore {
     match /predictors/{id} {
       allow read: if true;
       allow create: if isSelf(request.resource.data.uid)
-        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'name', 'created_at'])
+        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'name', 'verified', 'created_at'])
+        && ('verified' in request.resource.data) && request.resource.data.verified is bool
+        && (request.resource.data.verified == false || tokenVerified())
         && predictorValuesOk(request.resource.data)
         && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
-      allow update: if isSelf(resource.data.uid)
-        && changedKeys().hasOnly(['name'])
-        && okStr(request.resource.data.get('name', ''), 60);
+      // صاحبه يعدّل اسمه فقط · مدير المنصّة يعتمد المشارك المنتظر (verified → true)
+      allow update: if (isSelf(resource.data.uid)
+          && changedKeys().hasOnly(['name'])
+          && okStr(request.resource.data.get('name', ''), 60))
+        || (isPlatformAdmin()
+          && changedKeys().hasOnly(['verified'])
+          && request.resource.data.verified == true);
       allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
     }
 
@@ -363,10 +380,9 @@ service cloud.firestore {
       return d.get('competition_id', '') is string
         && d.get('tournament_id', '') is string
         && d.get('uid', '') is string
-        && ((d.get('phone', null) is string && d.get('phone', '').size() >= 3)
-            || (d.get('email', null) is string && d.get('email', '').size() >= 3))
-        && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() <= 40))
-        && (!('email' in d) || d.email == null || (d.email is string && d.email.size() <= 120))
+        // الهاتف/البريد اختياريان (مشارك «قيد موافقة الإدارة» قد لا يملك أيّاً منهما)
+        && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() >= 3 && d.phone.size() <= 40))
+        && (!('email' in d) || d.email == null || (d.email is string && d.email.size() >= 3 && d.email.size() <= 120))
         && (!('age' in d) || d.age == null || (d.age is int && d.age >= 3 && d.age <= 120))
         && (!('phone_verified' in d) || d.phone_verified is bool)
         // «هاتف موثّق» لا يُدَّعى: يُقبل true فقط إن طابق الرقمُ هاتفَ الحساب الموثّق (OTP)
@@ -403,8 +419,9 @@ service cloud.firestore {
         && pcomp(d.competition_id).status in ['open', 'closed']
         && pcomp(d.competition_id).get('predictions_open', true) == true
         && pcomp(d.competition_id).tournament_id == d.tournament_id
-        // لا يوقّع إلا مَن سجّل نفسه متوقّعاً في هذه المسابقة (وثيقة predictors موجودة)
-        && exists(/databases/$(database)/documents/predictors/$(d.competition_id + '__' + d.uid))
+        // لا يوقّع إلا مشارك مسجَّل وموثَّق/معتمَد (وثيقة predictors موجودة وverified ليست false)
+        && get(/databases/$(database)/documents/predictors/$(d.competition_id + '__' + d.uid))
+             .data.get('verified', true) == true
         && matchExists(d.match_id)
         && matchDoc(d.match_id).status == 'scheduled'
         && matchDoc(d.match_id).tournament_id == d.tournament_id

@@ -4,14 +4,15 @@
 import { isConfigured } from "./firebase.js";
 import { SITE_NAME } from "./config.js";
 import { t, statusLabel, matchStatusLabel, formatDate, formatTime, weekdayName } from "./i18n.js";
-import { el, mount, clear, spinner, emptyState, toast, openModal } from "./util.js";
+import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog } from "./util.js";
 import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
-  getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail,
-  fetchCompetitionsByTournament, subscribeCompetition, getCompCache,
+  getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail, syncMyUserDoc,
+  fetchCompetitionsByTournament, fetchCompetition, subscribeCompetition, getCompCache,
   fetchMyContact, fetchMyPredictor, registerPredictor, updateMyPredictor, savePrediction,
   computePredictionStandings, compScoring, isPredictable, predictionPoints, currentUid,
   phoneOtpMode, toE164, startPhoneAuth, confirmPhoneCode, clearPhoneRecaptcha,
+  pendingEmailLink, completeEmailLink, sendContestEmailLink,
 } from "./data.js";
 import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket, predictionBoard } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
@@ -41,6 +42,52 @@ document.getElementById("settings-btn")?.addEventListener("click", () => openSet
   session: (session?.user && !session.user.isAnonymous && session.user.email) ? session : null,
   onSignOut: async () => { try { await signOut(); } catch {} location.reload(); },
 }));
+
+// ---- إكمال توثيق البريد عند القدوم من رابط الرسالة --------------------------
+// الدخول/الربط بالرابط ثم إتمام التسجيل المحفوظ في المسودّة (إن وُجد)
+async function finishEmailLink(res) {
+  const { user, draft } = res;
+  try { await syncMyUserDoc(user); } catch {}
+  if (draft?.compId && draft?.data) {
+    const comp = await fetchCompetition(draft.compId).catch(() => null);
+    if (comp) {
+      const mine = await fetchMyPredictor(comp.id, user.uid).catch(() => null);
+      if (!mine) await registerPredictor(comp, draft.data);
+    }
+  }
+  toast(t.emailVerifiedDone, "ok");
+}
+async function handleEmailLinkArrival() {
+  const res = await completeEmailLink();
+  if (!res) return;
+  if (!res.needEmail) return finishEmailLink(res);
+  // الرابط فُتح على جهاز بلا مسودّة محفوظة — نطلب البريد للتأكيد
+  const emailI = el("input.input", { type: "email", style: "direction:ltr;text-align:end" });
+  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
+  const btn = el("button.btn.btn-primary.btn-block", { type: "submit", text: t.otpConfirm });
+  const form = el("form", {}, [
+    el("p", { style: "margin:0 0 12px;color:var(--text-2)", text: t.emailNeedConfirmHint }),
+    el("div.field", {}, [el("label", { text: t.regEmail }), emailI]),
+    err, btn,
+  ]);
+  const close = openModal({ title: "📧 " + t.emailNeedConfirm, body: form });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true; btn.disabled = true;
+    try {
+      const r2 = await completeEmailLink(emailI.value.trim());
+      close();
+      if (r2 && !r2.needEmail) await finishEmailLink(r2);
+    } catch (e2) {
+      console.error(e2);
+      btn.disabled = false;
+      err.hidden = false;
+      err.textContent = e2?.code === "auth/invalid-email" ? t.invalidEmail : (e2.message || t.errorGeneric);
+    }
+  });
+}
+if (pendingEmailLink()) {
+  handleEmailLinkArrival().catch((e) => { console.error(e); toast(t.emailLinkFailed, "err"); });
+}
 
 let currentUnsub = null;              // إلغاء اشتراك التحديث اللحظي الحالي
 let predLockTimer = null;             // مؤقّت قفل التوقّعات عند أقرب موعد مباراة
@@ -500,6 +547,7 @@ function renderCompView(root, state, comp, comps, live, rerender) {
   const myPredictor = uid ? live.predictors.find((p) => p.uid === uid) : null;
   const myPredictions = uid ? live.predictions.filter((p) => p.uid === uid) : [];
   const registered = !!myPredictor;
+  const pendingApproval = registered && myPredictor.verified === false;   // بانتظار اعتماد الإدارة
   const acceptsEntries = comp.status === "open" || comp.status === "closed";
   const predsOpen = comp.predictions_open !== false;   // مرحلة «تسجيل فقط»: التوقّعات مغلقة حتى يفتحها المنظّم
   const standings = computePredictionStandings(live.predictors, live.predictions, state.bundle.matches, comp);
@@ -538,7 +586,9 @@ function renderCompView(root, state, comp, comps, live, rerender) {
     // شريط حالتي المضغوط
     registered
       ? el("div.pc-mine-bar", {}, [
-          el("span.pc-badge-in", { text: "✓ " + t.youAreIn }),
+          pendingApproval
+            ? el("span.pc-badge-in", { style: "background:rgba(250,204,21,.2);color:#92400e", text: "⏳ " + t.pendingApprovalBar })
+            : el("span.pc-badge-in", { text: "✓ " + t.youAreIn }),
           el("span.pc-mine-name", { text: myPredictor.name || "" }),
           el("button.btn.btn-xs.pc-btn-ghost", { style: "margin-inline-start:auto", text: "✎ " + t.editMyInfo, onclick: () => openRegisterModal(comp, state, true, rerender) }),
         ])
@@ -568,12 +618,15 @@ function renderCompView(root, state, comp, comps, live, rerender) {
 
   const content = el("div.pc-content");
   if (state.predSubTab === "mine" && registered) {
-    content.appendChild(el("div.pc-hint", { text: predsOpen ? "🔒 " + t.predLockHint : "⏳ " + t.predNotStarted }));
+    const hint = pendingApproval ? "⏳ " + t.pendingApprovalHint
+      : (predsOpen ? "🔒 " + t.predLockHint : "⏳ " + t.predNotStarted);
+    content.appendChild(el("div.pc-hint", { text: hint }));
     const myMap = new Map(myPredictions.map((p) => [p.match_id, p]));
     const matches = state.bundle.matches.filter((m) => m.home_team_id && m.away_team_id);
     const section = el("div.pc-matches");
     if (!matches.length) section.appendChild(el("p.page-sub", { style: "padding:8px 2px", text: t.noMatchesToPredict }));
-    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), acceptsEntries && predsOpen, !predsOpen));
+    const lockNote = pendingApproval ? "⏳ " + t.pendingLockNote : (!predsOpen ? "⏳ " + t.predNotStartedShort : null);
+    for (const m of matches) section.appendChild(predictionMatchRow(comp, m, teamById, myMap.get(m.id), acceptsEntries && predsOpen && !pendingApproval, lockNote));
     content.appendChild(section);
   } else {
     content.appendChild(el("div.pc-live-line", {}, [el("span.pc-live-dot"), el("span", { text: t.liveBoardNote })]));
@@ -630,7 +683,8 @@ function prizesCard(comp) {
 }
 
 // صفّ مباراة واحدة داخل «توقّعاتي»: قابل للإدخال إن كانت مجدولة، وإلا مقفل مع النتيجة والنقاط
-function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, notStarted) {
+// lockNote: نصّ بديل لسبب القفل (لم تبدأ التوقّعات / بانتظار الموافقة) — null = القفل الاعتيادي
+function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, lockNote) {
   const home = teamById.get(m.home_team_id)?.name || "—";
   const away = teamById.get(m.away_team_id)?.name || "—";
   const editable = acceptsEntries && isPredictable(m);
@@ -674,7 +728,7 @@ function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, notStarte
     el("div.pc-row-mid", {}, [el("span.pc-result" + (m.status === "live" ? ".is-live" : ""), { text: resultTxt })]),
     nameA,
     el("div.pc-row-meta", {}, [
-      scheduledLocked ? el("span.pc-lock-note", { text: notStarted ? "⏳ " + t.predNotStartedShort : "🔒 " + t.predDeadlinePassed }) : null,
+      scheduledLocked ? el("span.pc-lock-note", { text: lockNote || ("🔒 " + t.predDeadlinePassed) }) : null,
       el("span.pc-guess", { text: t.yourGuess + ": " + guess }),
       pts != null ? el("span.pc-pts" + (pts > 0 ? ".pos" : ""), { text: "+" + pts }) : null,
     ]),
@@ -719,12 +773,25 @@ function openRegisterModal(comp, state, isEdit, rerender) {
   });
   const finish = () => { clearPhoneRecaptcha(); close(); };
 
-  // التسجيل الفعلي (يُستدعى بعد التوثيق، أو مباشرةً في المسار المجهول)
+  // التسجيل الفعلي (بعد التوثيق أو في مسار «قيد موافقة الإدارة»)
   async function doRegister(data) {
-    await registerPredictor(comp, data);
-    state.predSubTab = "mine";               // بعد الانضمام: انتقل مباشرةً لإدخال التوقّعات
-    toast(t.regDone, "ok");
+    const res = await registerPredictor(comp, data);
+    if (res.verified) { state.predSubTab = "mine"; toast(t.regDone, "ok"); }
+    else { state.predSubTab = "board"; toast(t.pendingSent, "ok"); }   // بانتظار الاعتماد
     finish();                                // onSnapshot يعيد رسم التبويب بالحالة الجديدة
+  }
+
+  // شاشة «تفقّد بريدك» بعد إرسال رابط التوثيق
+  function showEmailSentStep(email) {
+    mount(stepHost, el("div", { style: "text-align:center" }, [
+      el("div", { style: "font-size:2.2rem;margin:4px 0 8px", text: "📧" }),
+      el("div", { style: "font-weight:800;margin-bottom:4px", text: t.emailSentTitle }),
+      el("p", { style: "margin:0 0 2px;color:var(--text-2);font-size:.9rem", text: t.emailSentTo }),
+      el("div", { style: "font-weight:800;direction:ltr;margin:0 0 10px", text: email }),
+      el("p", { style: "margin:0 0 8px;color:var(--text-2);font-size:.88rem", text: t.emailClickNote }),
+      el("p", { style: "margin:0;color:var(--text-3);font-size:.84rem", text: t.emailSpamHint }),
+      el("button.btn.btn-outline.btn-block", { type: "button", style: "margin-top:14px", text: t.okGotIt, onclick: () => finish() }),
+    ]));
   }
 
   // بعد توثيق الهاتف: لو للحساب مشاركة قائمة في هذه المسابقة فهي استعادة لا تسجيل جديد
@@ -790,8 +857,6 @@ function openRegisterModal(comp, state, isEdit, rerender) {
     const phone = phoneI.value.trim(), email = emailI.value.trim();
     const ageRaw = ageI.value.trim();
     if (name.split(/\s+/).filter(Boolean).length < 3) return showErr(t.regNameShort);
-    // مطابقة قاعدة القبول: الهاتف أو البريد ٣ أحرف على الأقل (يمنع تسجيلاً ناقصاً يرفضه الخادم)
-    if (phone.length < 3 && email.length < 3) return showErr(t.regContactRequired);
     const age = ageRaw === "" ? null : parseInt(ageRaw, 10);
     if (age != null && !(age >= 5 && age <= 120)) return showErr(t.regAgeInvalid);
     const data = { name, phone, email, age };
@@ -803,7 +868,7 @@ function openRegisterModal(comp, state, isEdit, rerender) {
         finish();
         return;
       }
-      // مسار توثيق الهاتف: رقم بصيغة صالحة والوضع مفعّل — وإلا المسار المجهول القديم
+      // 1) توثيق الهاتف برمز SMS: رقم بصيغة صالحة والوضع مفعّل
       const e164 = (phoneOtpMode() !== "off" && phone) ? toE164(phone) : null;
       if (e164) {
         try {
@@ -820,9 +885,30 @@ function openRegisterModal(comp, state, isEdit, rerender) {
             if (e2?.code === "auth/too-many-requests") return showErr(t.otpTooMany);
             return showErr(e2.message || t.errorGeneric);
           }
-          // مزوّد الهاتف غير مفعّل في Firebase → نتابع بالتسجيل المجهول بهدوء
-          console.warn("Phone OTP unavailable — falling back to anonymous:", e2?.code);
+          // مزوّد الهاتف غير مفعّل → نجرّب توثيق البريد ثم طلب الموافقة
+          console.warn("Phone OTP unavailable:", e2?.code);
         }
+      }
+      // 2) توثيق البريد برابط بضغطة واحدة
+      if (/^\S+@\S+\.\S+$/.test(email)) {
+        try {
+          await sendContestEmailLink(email, { compId: comp.id, data });
+          showEmailSentStep(email);
+          return;
+        } catch (e2) {
+          const linkOff = ["auth/operation-not-allowed", "auth/admin-restricted-operation", "auth/configuration-not-found"];
+          if (!linkOff.includes(e2?.code)) {
+            console.error(e2);
+            submit.disabled = false; submit.textContent = t.regSubmit;
+            return showErr(e2?.code === "auth/invalid-email" ? t.invalidEmail : (e2.message || t.errorGeneric));
+          }
+          console.warn("Email link unavailable:", e2?.code);
+        }
+      }
+      // 3) بلا وسيلة توثيق → طلب مشاركة بانتظار موافقة إدارة المنصّة
+      if (!phone && !email) {
+        const ok = await confirmDialog(t.noContactConfirm, { danger: false, confirmText: t.regSubmit });
+        if (!ok) { submit.disabled = false; submit.textContent = t.regSubmit; return; }
       }
       await doRegister(data);
     } catch (e2) {
