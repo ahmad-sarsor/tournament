@@ -921,15 +921,19 @@ export async function registerPredictor(comp, { name, phone, email, age }) {
   const uid = user.uid;
   const id = predKey(comp.id, uid);
   const base = { competition_id: comp.id, tournament_id: comp.tournament_id, uid, created_at: Date.now() };
-  await setDoc(doc(requireDb(), "predictors", id), clean({
+  // كتابة ذرّية: إمّا الوثيقتان معاً (اسم عامّ + تواصل خاصّ) أو لا شيء — لا حالة نصفيّة
+  const d = requireDb();
+  const b = writeBatch(d);
+  b.set(doc(d, "predictors", id), clean({
     ...base, name: String(name || "").trim().slice(0, 60),
   }));
-  await setDoc(doc(requireDb(), "predictorContacts", id), clean({
+  b.set(doc(d, "predictorContacts", id), clean({
     ...base,
     phone: phone ? String(phone).trim().slice(0, 40) : null,
     email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
+  await b.commit();
   return { id, uid, name };
 }
 

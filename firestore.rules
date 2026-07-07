@@ -264,10 +264,11 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ---- المسجّلون: كلٌّ ينشئ/يحدّث وثيقته؛ الأعضاء فأعلى يقرؤون القائمة -------
-    //  (قراءة القائمة للأعضاء تتيح لمالكي التورنيرات اختيار الطاقم من المسجّلين)
+    // ---- المسجّلون: كلٌّ ينشئ/يحدّث وثيقته؛ قائمة المستخدمين لمدير المنصّة فقط ----
+    //  (لا يقرأ كامل الدليل إلا مدير المنصّة — منعاً لحصاد بُرد كل المسجَّلين؛
+    //   يقرأ كلُّ مستخدم وثيقته فقط. اقتراح الطاقم لمالكي التورنيرات يتحمّل غياب الدليل.)
     match /users/{userId} {
-      allow read: if isMember() || (request.auth != null && request.auth.uid == userId);
+      allow read: if isPlatformAdmin() || (request.auth != null && request.auth.uid == userId);
       allow create, update: if request.auth != null && request.auth.uid == userId
         && request.resource.data.keys().hasOnly(['email', 'name', 'created_at', 'verified'])
         && request.resource.data.email is string
@@ -397,6 +398,8 @@ service cloud.firestore {
         && pcomp(d.competition_id).status in ['open', 'closed']
         && pcomp(d.competition_id).get('predictions_open', true) == true
         && pcomp(d.competition_id).tournament_id == d.tournament_id
+        // لا يوقّع إلا مَن سجّل نفسه متوقّعاً في هذه المسابقة (وثيقة predictors موجودة)
+        && exists(/databases/$(database)/documents/predictors/$(d.competition_id + '__' + d.uid))
         && matchExists(d.match_id)
         && matchDoc(d.match_id).status == 'scheduled'
         && matchDoc(d.match_id).tournament_id == d.tournament_id
