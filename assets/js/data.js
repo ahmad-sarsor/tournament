@@ -214,14 +214,15 @@ export async function getSession() {
 }
 
 const NO_EMAIL_DOMAIN = "no-email.tournament.local";
-const usernameRe = /^[a-z0-9_]{3,24}$/;
+const usernameRe = /^[a-z]+(?:-[a-z]+)*$/;
 
 function normalizeUsername(username) {
   return String(username || "").trim().toLowerCase();
 }
 
 export function usernameValid(username) {
-  return usernameRe.test(normalizeUsername(username));
+  const uname = normalizeUsername(username);
+  return uname.length >= 3 && uname.length <= 24 && usernameRe.test(uname);
 }
 
 export function isNoEmailAuthEmail(email) {
@@ -233,17 +234,24 @@ function usernameAuthEmail(username) {
 }
 
 function usernameBaseFrom(...parts) {
-  const raw = parts.filter(Boolean).join("_").toLowerCase()
-    .replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").replace(/_+/g, "_");
+  const raw = parts.filter(Boolean).join("-").toLowerCase()
+    .replace(/[^a-z]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-");
   const base = raw || "user";
-  return base.slice(0, 18).replace(/^_+|_+$/g, "") || "user";
+  return base.slice(0, 18).replace(/^-+|-+$/g, "") || "user";
+}
+
+function uidLetters(uid, maxLen = 8) {
+  const digitWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+  const token = String(uid || "").toLowerCase().replace(/[0-9]/g, d => digitWords[Number(d)])
+    .replace(/[^a-z]+/g, "");
+  return (token || "account").slice(0, maxLen);
 }
 
 async function reserveUsernameForUser(u, preferred, authEmail, realEmail) {
   let base = normalizeUsername(preferred);
   if (!usernameValid(base)) base = usernameBaseFrom(realEmail?.split("@")[0], u.displayName, u.uid.slice(0, 6));
   for (let i = 0; i < 8; i++) {
-    const suffix = i === 0 ? "" : "_" + u.uid.slice(0, Math.min(6, 3 + i));
+    const suffix = i === 0 ? "" : "-" + uidLetters(u.uid, Math.min(6, 3 + i));
     const candidate = (base + suffix).slice(0, 24);
     if (!usernameValid(candidate)) continue;
     const ref = doc(requireDb(), "usernames", candidate);
@@ -258,7 +266,7 @@ async function reserveUsernameForUser(u, preferred, authEmail, realEmail) {
     }));
     return candidate;
   }
-  const fallback = ("user_" + u.uid.slice(0, 12)).slice(0, 24);
+  const fallback = ("user-" + uidLetters(u.uid, 12)).slice(0, 24).replace(/-+$/g, "");
   await setDoc(doc(requireDb(), "usernames", fallback), clean({
     uid: u.uid, username: fallback, auth_email: authEmail,
     email: realEmail || null, created_at: Date.now(),
@@ -283,9 +291,10 @@ export async function signIn(identifier, password) {
 }
 
 // تسجيل جديد: إنشاء حساب + رسالة تأكيد البريد + وثيقة في users (تظهر لمانحي الصلاحيات)
-export async function signUp(email, password, username) {
+export async function signUp(email, password, username, personName) {
   const realEmail = String(email || "").trim().toLowerCase();
   const uname = normalizeUsername(username);
+  const displayName = String(personName || "").trim().slice(0, 60) || uname;
   if (!usernameValid(uname)) {
     const err = new Error("invalid username");
     err.code = "app/invalid-username";
@@ -307,7 +316,6 @@ export async function signUp(email, password, username) {
   } else {
     cred = await createUserWithEmailAndPassword(auth, addr, password);
   }
-  const displayName = uname.slice(0, 60);
   try { if (displayName) await updateProfile(cred.user, { displayName }); } catch {}
   if (realEmail) {
     try { await sendEmailVerification(cred.user); } catch (e) { console.warn(e); }

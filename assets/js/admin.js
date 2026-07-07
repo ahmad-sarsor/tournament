@@ -212,6 +212,10 @@ function renderLogin() {
       id: "reg-username", type: "text", autocomplete: "username", maxlength: "24",
       placeholder: t.usernamePlaceholder, style: "direction:ltr;text-align:end",
     });
+    const personName = el("input.input", {
+      id: "reg-person-name", type: "text", autocomplete: "name", maxlength: "60",
+      required: isSignup, placeholder: t.personNamePlaceholder,
+    });
     const email = el("input.input", {
       id: "login-email", type: isSignup ? "email" : "text", autocomplete: "username",
       required: !isSignup, style: "direction:ltr;text-align:end",
@@ -266,6 +270,10 @@ function renderLogin() {
 
     const fields = [];
     if (isSignup) fields.push(el("div.field", {}, [
+      el("label", { text: t.personName, for: "reg-person-name" }),
+      personName,
+    ]));
+    if (isSignup) fields.push(el("div.field", {}, [
       el("label", { text: t.username, for: "reg-username" }),
       username,
       el("div.field-hint", { text: t.usernameHint }),
@@ -288,14 +296,16 @@ function renderLogin() {
       errBox.hidden = true;
       const addr = email.value.trim();
       const uname = username.value.trim();
+      const name = personName.value.trim();
       // تحقّق محلّي سريع قبل الشبكة
+      if (isSignup && !name) return showErr(t.personNameRequired);
       if (isSignup && !api.usernameValid(uname)) return showErr(t.usernameInvalid);
       if (!isSignup && !addr) return showErr(t.loginIdentifierRequired);
       if (isSignup && pass.value.length < 8) return showErr(t.weakPasswordLocal);
       btn.disabled = true; btn.textContent = t.loading;
       try {
         if (isSignup) {
-          await api.signUp(addr, pass.value, uname);
+          await api.signUp(addr, pass.value, uname, name);
           toast(addr ? t.verifySent : t.pendingApprovalSignup, "ok");
         }
         else await api.signIn(addr, pass.value);

@@ -285,8 +285,11 @@ service cloud.firestore {
     function userValuesOk(d) {
       return d.get('email', '') is string && d.get('email', '').size() <= 254
         && d.get('auth_email', '') is string && d.get('auth_email', '').size() <= 254
-        && (!('username' in d) || (d.username is string && d.username.size() >= 3 && d.username.size() <= 24))
-        && d.get('name', '') is string && d.get('name', '').size() <= 60
+        && (!('username' in d) || (d.username is string
+          && d.username.matches('^[a-z]+(-[a-z]+)*$')
+          && d.username.size() >= 3
+          && d.username.size() <= 24))
+        && okStr(d.get('name', ''), 60)
         && d.get('verified', false) is bool
         && d.get('approved', false) is bool
         && d.get('no_email', false) is bool
@@ -320,7 +323,9 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['uid', 'username', 'auth_email', 'email', 'created_at'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.username == username
-        && username.matches('^[a-z0-9_]{3,24}$')
+        && username.matches('^[a-z]+(-[a-z]+)*$')
+        && username.size() >= 3
+        && username.size() <= 24
         && request.resource.data.auth_email == request.auth.token.email.lower()
         && (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string)
         && okOptNum(request.resource.data, 'created_at')
