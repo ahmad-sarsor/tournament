@@ -330,7 +330,8 @@ service cloud.firestore {
         && (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string)
         && okOptNum(request.resource.data, 'created_at')
         && !exists(/databases/$(database)/documents/usernames/$(username));
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isOwner();
     }
 
     // ---- الأعضاء المعتمَدون (يُنشئون تورنيرات) — المالك وحده يعتمد -------------

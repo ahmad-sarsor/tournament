@@ -612,6 +612,7 @@ async function renderUsersAdmin() {
         if (em) actions.push(adminSet.has(em)
           ? el("button.btn.btn-sm.btn-danger", { text: t.removeAdminRole, onclick: () => toggleAdmin(u, false) })
           : el("button.btn.btn-sm.btn-outline", { text: t.makeAdmin, onclick: () => toggleAdmin(u, true) }));
+        actions.push(el("button.btn.btn-sm.btn-danger", { text: t.delete, onclick: () => removeUser(u) }));
       }
       list.appendChild(el("div.admin-list-item", {}, [
         el("div.grow", {}, [
@@ -646,6 +647,14 @@ async function toggleMember(u, on) {
 async function toggleUserApproval(u, on) {
   if (!on && !(await confirmDialog(`إلغاء اعتماد «${u.username || u.name}»؟`))) return;
   try { await api.setUserApproved(u.id, on); toast(t.saved, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+async function removeUser(u) {
+  if (api.isOwnerEmail(u.email)) return;
+  const label = u.name || u.username || u.email || "هذا المستخدم";
+  if (!(await confirmDialog(`حذف المستخدم «${label}» من المنصّة؟ ${t.confirmDelete}`))) return;
+  try { await api.deletePlatformUser(u); toast(t.deleted, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 

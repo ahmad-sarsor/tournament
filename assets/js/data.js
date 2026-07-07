@@ -519,6 +519,21 @@ export async function fetchMemberEmails() {
 export async function setUserApproved(uid, on) {
   await updateDoc(doc(requireDb(), "users", uid), { approved: !!on });
 }
+export async function deletePlatformUser(user) {
+  const d = requireDb();
+  const uid = String(user?.id || "").trim();
+  if (!uid) throw new Error("Missing user id");
+  const email = String(user?.email || "").trim().toLowerCase();
+  const username = normalizeUsername(user?.username);
+  const b = writeBatch(d);
+  b.delete(doc(d, "users", uid));
+  if (usernameValid(username)) b.delete(doc(d, "usernames", username));
+  if (email && !isNoEmailAuthEmail(email)) {
+    b.delete(doc(d, "admins", email));
+    b.delete(doc(d, "members", email));
+  }
+  await b.commit();
+}
 
 // المفتاح هو البريد بحروف صغيرة (كما تقارنه القواعد بـ uemail() المُصغَّر)
 export async function setAdmin(email, on) {
