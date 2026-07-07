@@ -70,8 +70,10 @@ service cloud.firestore {
     function pcompExists(cid) { return cid is string && exists(/databases/$(database)/documents/pcomps/$(cid)); }
     function matchDoc(mid)    { return get(/databases/$(database)/documents/matches/$(mid)).data; }
     function matchExists(mid) { return mid is string && exists(/databases/$(database)/documents/matches/$(mid)); }
-    // مالك الطلب (مجهول أو حقيقي) — المتوقّعون يسجّلون مجهولين
+    // مالك الطلب
     function isSelf(id) { return request.auth != null && request.auth.uid == id; }
+    // حساب منصة حقيقي: بريد موجود ومؤكّد على توكن Firebase Auth
+    function isPlatformAccount() { return uemail() != null; }
 
     // المفاتيح التي مسّها التعديل الحالي (للـ update فقط)
     function changedKeys() {
@@ -334,24 +336,15 @@ service cloud.firestore {
       allow delete: if parentManages(resource.data.tournament_id);
     }
 
-    // ---- المتوقّعون: اسم عامّ (للترتيب) — المشاركة مشروطة بهويّة موثّقة ---------
-    //  verified إلزامي عند التسجيل:
-    //   • true  = هويّة موثّقة على التوكن (هاتف OTP أو بريد مؤكَّد بالرابط) فقط.
-    //   • false = «قيد موافقة الإدارة» (بلا هاتف/بريد) — لا يُقبل توقّعه حتى
-    //     يعتمده مدير المنصّة (verified → true).
-    //  الوثائق القديمة بلا الحقل تُعامل كموثَّقة (توافق رجعي).
+    // ---- المتوقّعون: اسم الحساب العامّ (للترتيب) — المشاركة بحساب منصة فقط ----
+    //  التسجيل الجديد لا يقبل أسماء عابرة أو حسابات مجهولة: يجب أن يكون uid
+    //  هو uid حساب Firebase ببريد مؤكّد، و verified=true من البداية.
     function predictorValuesOk(d) {
       return okStr(d.get('name', ''), 60)
         && d.get('competition_id', '') is string
         && d.get('tournament_id', '') is string
         && d.get('uid', '') is string
         && okOptNum(d, 'created_at');
-    }
-    // هويّة موثّقة على توكن المصادقة: هاتف OTP أو بريد مؤكَّد
-    function tokenVerified() {
-      return request.auth != null
-        && (request.auth.token.get('phone_number', '') != ''
-            || request.auth.token.get('email_verified', false) == true);
     }
     // التسجيل متاح فقط والمسابقة «مفتوحة»، وضمن نفس التورنير
     function joinOpen(cid, tid) {
@@ -360,14 +353,15 @@ service cloud.firestore {
     match /predictors/{id} {
       allow read: if true;
       allow create: if isSelf(request.resource.data.uid)
+        && isPlatformAccount()
         && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'name', 'verified', 'created_at'])
         && ('verified' in request.resource.data) && request.resource.data.verified is bool
-        && (request.resource.data.verified == false || tokenVerified())
+        && request.resource.data.verified == true
         && predictorValuesOk(request.resource.data)
         && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
       // صاحبه يعدّل اسمه فقط · مدير المنصّة يعتمد المشارك المنتظر (verified → true)
       // · منظّم التورنير يعدّل الاسم و«تسوية النقاط» (points_adj تُضاف لمجموع نقاطه)
-      allow update: if (isSelf(resource.data.uid)
+      allow update: if (isSelf(resource.data.uid) && isPlatformAccount()
           && changedKeys().hasOnly(['name'])
           && okStr(request.resource.data.get('name', ''), 60))
         || (isPlatformAdmin()
@@ -384,7 +378,7 @@ service cloud.firestore {
     }
 
     // ---- تواصل المتوقّع (هاتف/بريد/عمر) — خاصّ: يقرؤه صاحبه أو منظّم التورنير ----
-    // فحوص الأنواع والأطوال فقط (الهاتف/البريد اختياريان — مشارك «قيد الموافقة» قد لا يملكهما)
+    // فحوص الأنواع والأطوال فقط (الهاتف اختياري، والبريد يأتي من حساب المنصّة)
     function contactFieldsOk(d) {
       return d.get('competition_id', '') is string
         && d.get('tournament_id', '') is string
@@ -395,7 +389,7 @@ service cloud.firestore {
         && (!('phone_verified' in d) || d.phone_verified is bool)
         && okOptNum(d, 'created_at');
     }
-    // «هاتف موثّق» لا يُدَّعى: يُقبل true فقط إن طابق الرقمُ هاتفَ الحساب الموثّق (OTP)
+    // حقل قديم: لا يُدَّعى «هاتف موثّق» إلا إن طابق الرقم هاتف توكن Firebase نفسه
     function phoneClaimOk(d) {
       return d.get('phone_verified', false) == false
         || (request.auth != null
@@ -409,7 +403,7 @@ service cloud.firestore {
       // قابلة للإثبات لمدير المنصّة مباشرة (قواعد القوائم تُقيَّم من شكل الاستعلام)
       allow read: if isPlatformAdmin() || isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
       // صاحبها عند الانضمام · أو المنظّم يستكمل وثيقة ناقصة لمشارك (بلا ادّعاء توثيق)
-      allow create: if (isSelf(request.resource.data.uid)
+      allow create: if (isSelf(request.resource.data.uid) && isPlatformAccount()
           && request.resource.data.keys().hasOnly(contactKeys())
           && contactFieldsOk(request.resource.data)
           && phoneClaimOk(request.resource.data)
@@ -420,7 +414,7 @@ service cloud.firestore {
           && request.resource.data.get('phone_verified', false) == false);
       // صاحبها يعدّلها (مع شرط التوثيق) · المنظّم يعدّلها لكن لا يمنح «موثّق» —
       // وتغيير الرقم يُلزمه إسقاط شارة التوثيق (يفعله الكود تلقائياً)
-      allow update: if (isSelf(resource.data.uid)
+      allow update: if (isSelf(resource.data.uid) && isPlatformAccount()
           && changedKeys().hasOnly(['phone', 'email', 'age', 'phone_verified'])
           && contactFieldsOk(request.resource.data)
           && phoneClaimOk(request.resource.data))
@@ -448,7 +442,8 @@ service cloud.firestore {
         && pcomp(d.competition_id).status in ['open', 'closed']
         && pcomp(d.competition_id).get('predictions_open', true) == true
         && pcomp(d.competition_id).tournament_id == d.tournament_id
-        // لا يوقّع إلا مشارك مسجَّل وموثَّق/معتمَد (وثيقة predictors موجودة وverified ليست false)
+        // لا يوقّع إلا مشارك مسجَّل بحساب منصة وموثَّق في هذه المسابقة
+        && exists(/databases/$(database)/documents/predictors/$(d.competition_id + '__' + d.uid))
         && get(/databases/$(database)/documents/predictors/$(d.competition_id + '__' + d.uid))
              .data.get('verified', true) == true
         && matchExists(d.match_id)
@@ -459,11 +454,11 @@ service cloud.firestore {
     }
     match /predictions/{id} {
       allow read: if true;
-      allow create: if isSelf(request.resource.data.uid)
+      allow create: if isSelf(request.resource.data.uid) && isPlatformAccount()
         && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'match_id', 'uid', 'home', 'away', 'created_at'])
         && predictionValuesOk(request.resource.data)
         && predEntryAllowed(request.resource.data);
-      allow update: if isSelf(resource.data.uid)
+      allow update: if isSelf(resource.data.uid) && isPlatformAccount()
         && changedKeys().hasOnly(['home', 'away', 'created_at'])
         && predictionValuesOk(request.resource.data)
         && predEntryAllowed(request.resource.data);

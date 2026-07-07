@@ -3,7 +3,7 @@
 //  الأسماء المُصدَّرة ثابتة كي تبقى بقية الواجهة كما هي.
 // ============================================================================
 import { db, auth } from "./firebase.js";
-import { OWNER_EMAILS, PHONE_DEFAULT_CC, PHONE_OTP } from "./config.js";
+import { OWNER_EMAILS } from "./config.js";
 import {
   collection, doc, getDoc, getDocs, query, where,
   addDoc, setDoc, updateDoc, deleteDoc, writeBatch, onSnapshot,
@@ -12,11 +12,9 @@ import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
   signOut as fbSignOut, onAuthStateChanged,
   sendEmailVerification, sendPasswordResetEmail,
-  GoogleAuthProvider, signInWithPopup, signInAnonymously,
+  GoogleAuthProvider, signInWithPopup,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
-  RecaptchaVerifier, PhoneAuthProvider, signInWithPhoneNumber, linkWithPhoneNumber,
-  signInWithCredential, linkWithCredential,
-  sendSignInLinkToEmail, isSignInWithEmailLink, signInWithEmailLink,
+  linkWithCredential,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
 
@@ -218,8 +216,8 @@ export async function signIn(email, password) {
 // تسجيل جديد: إنشاء حساب + رسالة تأكيد البريد + وثيقة في users (تظهر لمانحي الصلاحيات)
 export async function signUp(email, password, name) {
   const addr = String(email || "").trim();
-  // لو على هذا المتصفّح حساب بلا بريد (متوقّع مجهول أو موثَّق بهاتف): نربط البريد
-  // بالحساب نفسه بدل إنشاء حساب جديد — فيبقى uid كما هو ولا تضيع مشاركته في المسابقة
+  // توافق رجعي: لو على هذا المتصفّح حساب Firebase قديم بلا بريد، نربط البريد
+  // بالحساب نفسه بدل إنشاء حساب جديد — فيبقى uid كما هو.
   let cred;
   const cur = auth.currentUser;
   if (cur && !cur.email) {
@@ -270,7 +268,7 @@ export async function refreshSession() {
 
 // مزامنة وثيقة المستخدم (الاسم/حالة التوثيق) — تُنشأ أيضاً عند أول دخول Google
 export async function syncMyUserDoc(u = currentUser) {
-  if (!u || !db || u.isAnonymous) return;   // المستخدمون المجهولون (المتوقّعون) بلا وثيقة users
+  if (!u || !db || u.isAnonymous) return;   // الحسابات المجهولة القديمة ليست أعضاء منصة
   const ref = doc(requireDb(), "users", u.uid);
   let snap = null;
   try { snap = await getDoc(ref); } catch { return; } // قبل نشر القواعد الجديدة قد تُرفض القراءة
@@ -875,136 +873,35 @@ export function subscribeTournament(tid, onChange) {
 
 // ============================================================================
 //  مسابقة التوقّعات (Predictions)
-//  • المتوقّع = مستخدم مجهول (Anonymous Auth) لا يحتاج بريداً؛ يسجّل اسمه الثلاثي
-//    وهاتفه/بريده وعمره مرّة واحدة على الجهاز.
+//  • المتوقّع = حساب منصة حقيقي ببريد مؤكَّد. لا ننشئ حساباً مجهولاً للمشاركة؛
+//    لذلك يستطيع المشارك تسجيل الدخول لاحقاً من أي جهاز والعودة لنفس توقّعاته.
 //  • النقاط ثلاث مستويات (قابلة للتعديل لكل مسابقة): النتيجة بالضبط / الاتجاه+الفارق /
 //    الفائز فقط. الترتيب يُحتسب في المتصفّح من المباريات المنتهية.
 // ============================================================================
 
-// معرّف الجهاز الحالي (متوقّع) — يُسجَّل مجهولاً عند أول مشاركة فقط
-export async function ensureAnon() {
-  if (!auth) throw new Error("Firebase not configured");
-  await authReady;                       // ننتظر أوّل حالة مصادقة (قد يكون مسجّلاً مسبقاً)
-  if (auth.currentUser) return auth.currentUser;   // حساب قائم (مجهول أو حقيقي)
-  const cred = await signInAnonymously(auth);
-  return cred.user;
+function isPlatformAccount(u) {
+  return !!(u && !u.isAnonymous && u.email && u.emailVerified);
 }
 
-// معرّف المستخدم الحالي إن وُجد (بلا إنشاء حساب جديد) — لفحص «هل أنا مشارك؟»
-export function currentUid() { return auth?.currentUser?.uid || null; }
-
-// ---- توثيق هاتف المتوقّع (OTP عبر SMS) --------------------------------------
-//  الهدف: هويّة محمولة عبر الأجهزة (بدل الحساب المجهول المربوط بالمتصفّح):
-//  • جهاز جديد: دخول بالهاتف يعيد نفس الحساب → نفس المشاركة والتوقّعات.
-//  • مشارك واحد لكل رقم (الرقم لا يُربط إلا بحساب واحد في Firebase).
-//  التفعيل: مزوّد Phone في Firebase Authentication. غير مفعّل؟ يتراجع التسجيل
-//  تلقائياً للوضع المجهول القديم (لا شيء ينكسر).
-
-export function phoneOtpMode() { return PHONE_OTP; }
-
-// تحويل رقم محلي (05xxxxxxxx) إلى الصيغة الدولية E.164 — null إن تعذّر
-export function toE164(raw, cc = PHONE_DEFAULT_CC) {
-  let s = String(raw || "").replace(/[\s\-().]/g, "");
-  if (!s) return null;
-  if (s.startsWith("00")) s = "+" + s.slice(2);
-  if (!s.startsWith("+")) {
-    if (!s.startsWith("0")) return null;   // بلا صفر بادئ ولا +: صيغة غامضة — نرفض
-    s = cc + s.slice(1);
-  }
-  return /^\+[1-9]\d{6,14}$/.test(s) ? s : null;
+function accountName(u) {
+  return String(u?.displayName || u?.email || "").trim().slice(0, 60);
 }
 
-// reCAPTCHA غير المرئي المطلوب لهاتف Firebase — واحد حيّ في كل لحظة
-let phoneRecaptcha = null, phoneRecaptchaHost = null;
-export function clearPhoneRecaptcha() {
-  try { phoneRecaptcha?.clear(); } catch {}
-  phoneRecaptcha = null; phoneRecaptchaHost = null;
-}
-
-// يبدأ إرسال رمز التحقّق. إن كان على المتصفّح حساب بلا هاتف (مجهول عادةً) نربط
-// الهاتف به — فيحتفظ بنفس uid وكل توقّعاته. وإلا ندخل بالهاتف مباشرةً.
-export async function startPhoneAuth(e164, container) {
+// حساب المنصة الحالي. يرمي خطأ واضحاً بدل إنشاء حساب مجهول.
+export async function requirePlatformUser() {
   if (!auth) throw new Error("Firebase not configured");
   await authReady;
-  auth.languageCode = "ar";
-  if (!phoneRecaptcha || phoneRecaptchaHost !== container) {
-    clearPhoneRecaptcha();
-    phoneRecaptcha = new RecaptchaVerifier(auth, container, { size: "invisible" });
-    phoneRecaptchaHost = container;
-  }
-  try {
-    const u = auth.currentUser;
-    if (u && !u.phoneNumber) return await linkWithPhoneNumber(u, e164, phoneRecaptcha);
-    return await signInWithPhoneNumber(auth, e164, phoneRecaptcha);
-  } catch (e) {
-    clearPhoneRecaptcha();   // الـ verifier يُستهلك عند الفشل — ننظّفه لإعادة المحاولة
-    throw e;
-  }
+  const u = auth.currentUser;
+  if (isPlatformAccount(u)) return u;
+  const err = new Error("يجب تسجيل الدخول بحساب منصة مؤكَّد للمشاركة");
+  err.code = u && !u.isAnonymous && u.email ? "auth/email-not-verified" : "auth/login-required";
+  throw err;
 }
 
-// تأكيد الرمز. لو كان الرقم مربوطاً بحساب آخر (مشارك قديم من جهاز جديد)
-// ندخل إلى ذلك الحساب بنفس الرمز — فتعود مشاركته كما كانت.
-export async function confirmPhoneCode(confirmation, code) {
-  try {
-    return (await confirmation.confirm(code)).user;
-  } catch (e) {
-    if (e?.code === "auth/credential-already-in-use"
-        || e?.code === "auth/account-exists-with-different-credential") {
-      const cred = PhoneAuthProvider.credential(confirmation.verificationId, code);
-      return (await signInWithCredential(auth, cred)).user;
-    }
-    throw e;
-  }
-}
-
-// ---- توثيق البريد برابط (Email Link) للمتوقّعين ------------------------------
-//  بديل توثيق الهاتف: نرسل رابط دخول لبريد المشارك؛ الضغط عليه يعيده للصفحة
-//  ويوثّق بريده (email_verified=true) ويكمل تسجيله تلقائياً.
-//  التفعيل: Authentication → Sign-in method → Email/Password → «Email link».
-
-const EMAIL_LINK_KEY = "tp_email_link_reg";   // مسودّة التسجيل بانتظار الضغط على الرابط
-
-export async function sendContestEmailLink(email, draft) {
-  if (!auth) throw new Error("Firebase not configured");
-  auth.languageCode = "ar";
-  // نعود لنفس صفحة المسابقة — الرابط يكمل التسجيل تلقائياً
-  const settings = { url: location.href, handleCodeInApp: true };
-  await sendSignInLinkToEmail(auth, String(email || "").trim(), settings);
-  try { localStorage.setItem(EMAIL_LINK_KEY, JSON.stringify({ email: String(email).trim(), draft, ts: Date.now() })); } catch {}
-}
-
-// هل فُتحت الصفحة من رابط توثيق بريد؟
-export function pendingEmailLink() {
-  try { return !!auth && isSignInWithEmailLink(auth, location.href); } catch { return false; }
-}
-
-// إكمال الدخول من الرابط. يعيد { user, draft } أو { needEmail: true } إن فُتح
-// الرابط على جهاز آخر (لا مسودّة محفوظة) — فتطلب الواجهة البريد للتأكيد.
-export async function completeEmailLink(emailOverride) {
-  if (!pendingEmailLink()) return null;
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(EMAIL_LINK_KEY) || "null"); } catch {}
-  const email = String(emailOverride || saved?.email || "").trim();
-  if (!email) return { needEmail: true };
-  const link = location.href;
-  let user;
-  const cur = auth.currentUser;
-  try {
-    if (cur && !cur.email) {
-      // ربط البريد بالحساب القائم (مجهول/هاتفي) — نفس uid فلا تضيع المشاركة
-      user = (await linkWithCredential(cur, EmailAuthProvider.credentialWithLink(email, link))).user;
-    } else {
-      user = (await signInWithEmailLink(auth, email, link)).user;
-    }
-  } catch (e) {
-    if (e?.code === "auth/credential-already-in-use" || e?.code === "auth/email-already-in-use") {
-      user = (await signInWithEmailLink(auth, email, link)).user;   // البريد لحساب قائم → ندخل إليه
-    } else throw e;
-  }
-  try { localStorage.removeItem(EMAIL_LINK_KEY); } catch {}
-  // تنظيف العنوان من معاملات الرابط (oobCode وأخواتها)
-  try { history.replaceState(null, "", location.pathname + location.hash); } catch {}
-  return { user, draft: saved?.draft || null };
+// معرّف حساب المنصة الحالي إن وُجد (بلا إنشاء حساب جديد) — لفحص «هل أنا مشارك؟»
+export function currentUid() {
+  const u = auth?.currentUser;
+  return isPlatformAccount(u) ? u.uid : null;
 }
 
 // ---- المسابقات (pcomps) ----------------------------------------------------
@@ -1046,34 +943,30 @@ export async function deleteCompetition(id) {
 
 const predKey = (compId, uid) => `${compId}__${uid}`;
 
-// تسجيل مشارك: وثيقة عامّة (اسم فقط، للترتيب) + وثيقة تواصل خاصّة (هاتف/بريد/عمر)
+// تسجيل مشارك: وثيقة عامّة (اسم الحساب للترتيب) + وثيقة تواصل خاصّة (هاتف/بريد/عمر)
 export async function registerPredictor(comp, { name, phone, email, age }) {
-  const user = await ensureAnon();
+  const user = await requirePlatformUser();
+  try { await syncMyUserDoc(user); } catch (e) { console.warn(e); }
   const uid = user.uid;
   const id = predKey(comp.id, uid);
   const base = { competition_id: comp.id, tournament_id: comp.tournament_id, uid, created_at: Date.now() };
-  // إن وثّق هاتفه بـ OTP نخزّن الرقم الموثّق نفسه (القواعد تشترط تطابقه مع التوكن)
-  const tokenPhone = user.phoneNumber || null;
-  const phoneStr = tokenPhone || (phone ? String(phone).trim().slice(0, 40) : null);
-  // موثّق = هاتف OTP أو بريد مؤكَّد على التوكن؛ غير ذلك = «قيد موافقة الإدارة»
-  const verified = !!(tokenPhone || (user.email && user.emailVerified));
+  const displayName = accountName(user) || String(name || "").trim().slice(0, 60);
+  const phoneStr = phone ? String(phone).trim().slice(0, 40) : null;
   // كتابة ذرّية: إمّا الوثيقتان معاً (اسم عامّ + تواصل خاصّ) أو لا شيء — لا حالة نصفيّة
   const d = requireDb();
   const b = writeBatch(d);
   b.set(doc(d, "predictors", id), clean({
-    ...base, name: String(name || "").trim().slice(0, 60), verified,
+    ...base, name: displayName, verified: true,
   }));
   b.set(doc(d, "predictorContacts", id), clean({
     ...base,
     phone: phoneStr,
-    phone_verified: !!tokenPhone,
-    email: (user.email && user.emailVerified)
-      ? user.email.toLowerCase()
-      : (email ? String(email).trim().toLowerCase().slice(0, 120) : null),
+    phone_verified: false,
+    email: String(user.email || email || "").trim().toLowerCase().slice(0, 120),
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
   await b.commit();
-  return { id, uid, name, verified };
+  return { id, uid, name: displayName, verified: true };
 }
 
 // اعتماد مشارك «قيد الموافقة» — لمدير المنصّة فقط (تفرضه القواعد)
@@ -1123,15 +1016,16 @@ export async function deleteParticipant(comp, uid) {
 
 // تعديل اسم المشارك ووثيقة تواصله
 export async function updateMyPredictor(comp, uid, { name, phone, email, age }) {
-  const id = predKey(comp.id, uid);
+  const user = await requirePlatformUser();
+  if (uid && uid !== user.uid) throw new Error("user mismatch");
+  const id = predKey(comp.id, user.uid);
   const phoneStr = phone ? String(phone).trim().slice(0, 40) : null;
-  // «موثّق» فقط إن بقي الرقم المعروض هو رقم الحساب الموثّق نفسه
-  const tokenPhone = auth?.currentUser?.phoneNumber || null;
-  await updateDoc(doc(requireDb(), "predictors", id), { name: String(name || "").trim().slice(0, 60) });
+  const displayName = accountName(user) || String(name || "").trim().slice(0, 60);
+  await updateDoc(doc(requireDb(), "predictors", id), { name: displayName });
   await updateDoc(doc(requireDb(), "predictorContacts", id), clean({
     phone: phoneStr,
-    phone_verified: !!tokenPhone && phoneStr === tokenPhone,
-    email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
+    phone_verified: false,
+    email: String(user.email || email || "").trim().toLowerCase().slice(0, 120),
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
 }
@@ -1176,7 +1070,7 @@ export async function fetchMyPredictions(compId, uid) {
 
 // حفظ توقّع لمباراة واحدة (معرّف ثابت يمنع التكرار). القواعد تمنع الحفظ بعد بدء المباراة.
 export async function savePrediction(comp, match, home, away) {
-  const user = await ensureAnon();
+  const user = await requirePlatformUser();
   const uid = user.uid;
   const id = predKey(comp.id, uid) + "__" + match.id;
   const data = {
