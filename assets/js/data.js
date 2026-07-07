@@ -279,8 +279,9 @@ async function resolveLoginIdentifier(identifier) {
   if (raw.includes("@")) return raw.toLowerCase();
   const username = normalizeUsername(raw);
   if (!usernameValid(username)) return raw;
-  const s = await getDoc(doc(requireDb(), "usernames", username));
-  return s.exists() ? String(s.data().auth_email || "").toLowerCase() : raw;
+  const s = await getDoc(doc(requireDb(), "usernames", username)).catch(() => null);
+  if (s?.exists()) return String(s.data().auth_email || "").toLowerCase();
+  return usernameAuthEmail(username);
 }
 
 export async function signIn(identifier, password) {

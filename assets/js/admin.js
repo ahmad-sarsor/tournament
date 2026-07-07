@@ -169,8 +169,6 @@ async function route() {
   cleanupAdmin();
   if (!isConfigured) return renderSetupNeeded();
   if (!session) return renderLogin();
-  // بريد غير مُوثَّق: لا صلاحيات كتابة — نطالب بتأكيد البريد أولاً
-  if (!session.user.emailVerified && !api.isNoEmailAuthEmail(session.user.email)) { clear(userBox); renderUserBox(); return renderVerifyEmail(); }
   const authReturn = consumeAuthReturn();
   if (authReturn) { location.href = authReturn; return; }
   const r = parseHash();
@@ -306,7 +304,12 @@ function renderLogin() {
       try {
         if (isSignup) {
           await api.signUp(addr, pass.value, uname, name);
-          toast(addr ? t.verifySent : t.pendingApprovalSignup, "ok");
+          session = realSession(await api.getSession());
+          await refreshRole();
+          renderUserBox();
+          location.hash = "#/";
+          toast(addr ? t.signupEnterVerifyLater : t.pendingApprovalSignup, "ok");
+          route();
         }
         else await api.signIn(addr, pass.value);
         // onAuthChange يتكفّل بالتوجيه (لغير المؤكَّدين → شاشة التأكيد)
@@ -487,9 +490,10 @@ async function renderHome() {
   ]);
 
   // مسجَّل غير معتمَد: تنبيه بانتظار الاعتماد
+  const isNoEmailAccount = api.isNoEmailAuthEmail(session?.user?.email);
   const banner = !isMemberUser ? el("div.alert.alert-warn", { style: "margin-bottom:14px" }, [
     el("div", { style: "font-weight:700", text: "⏳ " + t.pendingTitle }),
-    el("div", { style: "font-size:.88rem;margin-top:4px", text: t.pendingBody }),
+    el("div", { style: "font-size:.88rem;margin-top:4px", text: isNoEmailAccount ? t.pendingBody : t.emailPendingBody }),
   ]) : null;
 
   const list = el("div");
