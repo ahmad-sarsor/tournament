@@ -9,8 +9,9 @@ import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
   getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail,
   fetchCompetitionsByTournament, subscribeCompetition, getCompCache,
-  fetchMyContact, registerPredictor, updateMyPredictor, savePrediction,
+  fetchMyContact, fetchMyPredictor, registerPredictor, updateMyPredictor, savePrediction,
   computePredictionStandings, compScoring, isPredictable, predictionPoints, currentUid,
+  phoneOtpMode, toE164, startPhoneAuth, confirmPhoneCode, clearPhoneRecaptcha,
 } from "./data.js";
 import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket, predictionBoard } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
@@ -26,8 +27,8 @@ let session = null;
 const authLink = document.querySelector(".header-auth");
 function renderAuthLink() {
   if (!authLink) return;
-  // المستخدم المجهول (متوقّع في مسابقة) ليس «دخولاً» للوحة المنظّم
-  const real = session?.user && !session.user.isAnonymous;
+  // المستخدم المجهول أو الموثَّق بهاتف فقط (متوقّع في مسابقة) ليس «دخولاً» للوحة المنظّم
+  const real = session?.user && !session.user.isAnonymous && session.user.email;
   if (real) { authLink.textContent = "لوحتي"; authLink.setAttribute("href", "./admin.html"); }
   else { authLink.textContent = "دخول / تسجيل"; authLink.setAttribute("href", "./admin.html#/register"); }
 }
@@ -36,7 +37,8 @@ onAuthChange((s) => { session = s; renderAuthLink(); });
 
 document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({
   isAdmin: false,
-  session: (session?.user && !session.user.isAnonymous) ? session : null,   // المجهول ليس جلسة منظّم
+  // المجهول أو الموثَّق بهاتف فقط ليس جلسة منظّم
+  session: (session?.user && !session.user.isAnonymous && session.user.email) ? session : null,
   onSignOut: async () => { try { await signOut(); } catch {} location.reload(); },
 }));
 
@@ -538,14 +540,20 @@ function renderCompView(root, state, comp, comps, live, rerender) {
       ? el("div.pc-mine-bar", {}, [
           el("span.pc-badge-in", { text: "✓ " + t.youAreIn }),
           el("span.pc-mine-name", { text: myPredictor.name || "" }),
-          el("button.btn.btn-xs.pc-btn-ghost", { style: "margin-inline-start:auto", text: "✎ " + t.editMyInfo, onclick: () => openRegisterModal(comp, state, true) }),
+          el("button.btn.btn-xs.pc-btn-ghost", { style: "margin-inline-start:auto", text: "✎ " + t.editMyInfo, onclick: () => openRegisterModal(comp, state, true, rerender) }),
         ])
       : (comp.status === "open"
           ? el("div.pc-join-row", {}, [
               el("span.pc-join-txt", { text: t.registerIntro }),
-              el("button.btn.pc-btn", { text: "🎯 " + t.joinCompetition, onclick: () => openRegisterModal(comp, state, false) }),
+              el("button.btn.pc-btn", { text: "🎯 " + t.joinCompetition, onclick: () => openRegisterModal(comp, state, false, rerender) }),
             ])
           : el("div.pc-note-warn", { text: t.registrationClosed })),
+    // استعادة مشاركة موثّقة بالهاتف من جهاز جديد (لغير المسجَّلين على هذا الجهاز)
+    (!registered && acceptsEntries && phoneOtpMode() !== "off")
+      ? el("div", { style: "margin-top:8px;text-align:center" }, [
+          el("button.link-btn", { type: "button", text: "📱 " + t.recoverLink, onclick: () => openRecoverModal(comp, state, rerender) }),
+        ])
+      : null,
     (comp.status === "open" && !predsOpen) ? el("div.pc-note-warn", { text: "⏳ " + t.predNotStartedHero }) : null,
   ]));
 
@@ -642,7 +650,15 @@ function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, notStarte
       catch (e) { toast(e.message || t.errorGeneric, "err"); }
       finally { saveBtn.disabled = false; }
     });
-    return el("div.pc-row", {}, [nameH, el("div.pc-row-mid", {}, [inH, el("span.pc-colon", { text: ":" }), inA]), nameA, saveBtn]);
+    // تذكير قرب القفل (ساعتان فأقل) — كي لا يفوت المشارك الموعد
+    let soonMeta = null;
+    if (m.locks_at != null) {
+      const mins = Math.round((m.locks_at - Date.now()) / 60000);
+      if (mins <= 120) soonMeta = el("div.pc-row-meta", {}, [
+        el("span.pc-lock-note", { text: "⏱ " + t.locksInMin.replace("{m}", String(Math.max(1, mins))) }),
+      ]);
+    }
+    return el("div.pc-row", {}, [nameH, el("div.pc-row-mid", {}, [inH, el("span.pc-colon", { text: ":" }), inA]), nameA, saveBtn, soonMeta]);
   }
 
   // مقفلة (بدأت المباراة أو حلّ موعدها)
@@ -665,8 +681,10 @@ function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, notStarte
   ]);
 }
 
-// نموذج التسجيل/تعديل البيانات (اسم ثلاثي + هاتف/بريد + عمر)
-function openRegisterModal(comp, state, isEdit) {
+// نموذج التسجيل/تعديل البيانات (اسم ثلاثي + هاتف/بريد + عمر).
+// التسجيل الجديد يحاول توثيق الهاتف برمز SMS (هويّة محمولة عبر الأجهزة)؛
+// إن لم يكن مزوّد الهاتف مفعّلاً في Firebase يتراجع تلقائياً للتسجيل المجهول القديم.
+function openRegisterModal(comp, state, isEdit, rerender) {
   const live = getCompCache(comp.id);
   const myName = (isEdit && live) ? (live.predictors.find((p) => p.uid === currentUid())?.name || "") : "";
   const nameI = el("input.input", { type: "text", maxlength: "60", placeholder: t.regNamePlaceholder, value: myName });
@@ -675,6 +693,7 @@ function openRegisterModal(comp, state, isEdit) {
   const ageI = el("input.input", { type: "number", min: "5", max: "120", inputmode: "numeric" });
   const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
   const showErr = (msg) => { err.hidden = false; err.textContent = msg; };
+  const recaptchaHost = el("div");   // حاضن reCAPTCHA غير المرئي (توثيق الهاتف)
 
   // عند التعديل: نجلب بيانات التواصل الحالية لتعبئتها
   if (isEdit) fetchMyContact(comp.id, currentUid()).then((c) => {
@@ -690,8 +709,80 @@ function openRegisterModal(comp, state, isEdit) {
     el("div.field", {}, [el("label", { text: t.regAge }), ageI]),
     err, submit,
     el("button", { type: "submit", hidden: true }),
+    recaptchaHost,
   ]);
-  const close = openModal({ title: isEdit ? "✎ " + t.editMyInfo : "🎯 " + t.registerTitle, body: form });
+  const stepHost = el("div", {}, [form]);   // نبدّل بين خطوة البيانات وخطوة الرمز
+  const close = openModal({
+    title: isEdit ? "✎ " + t.editMyInfo : "🎯 " + t.registerTitle,
+    body: stepHost,
+    onDismiss: () => clearPhoneRecaptcha(),
+  });
+  const finish = () => { clearPhoneRecaptcha(); close(); };
+
+  // التسجيل الفعلي (يُستدعى بعد التوثيق، أو مباشرةً في المسار المجهول)
+  async function doRegister(data) {
+    await registerPredictor(comp, data);
+    state.predSubTab = "mine";               // بعد الانضمام: انتقل مباشرةً لإدخال التوقّعات
+    toast(t.regDone, "ok");
+    finish();                                // onSnapshot يعيد رسم التبويب بالحالة الجديدة
+  }
+
+  // بعد توثيق الهاتف: لو للحساب مشاركة قائمة في هذه المسابقة فهي استعادة لا تسجيل جديد
+  async function afterPhoneUser(user, data) {
+    const mine = await fetchMyPredictor(comp.id, user.uid).catch(() => null);
+    if (mine) { state.predSubTab = "mine"; toast(t.recoverDone, "ok"); finish(); rerender?.(); return; }
+    await doRegister(data);
+  }
+
+  // الخطوة الثانية: إدخال رمز التحقّق المُرسَل بالـ SMS
+  function showCodeStep(confirmation, data, e164) {
+    const codeI = el("input.input", {
+      type: "text", inputmode: "numeric", maxlength: "8", autocomplete: "one-time-code",
+      style: "direction:ltr;text-align:center;letter-spacing:4px;font-weight:700",
+    });
+    const cErr = el("div.alert.alert-error", { hidden: true, role: "alert" });
+    const showCErr = (m) => { cErr.hidden = false; cErr.textContent = m; };
+    const confirmBtn = el("button.btn.btn-primary.btn-block", { type: "submit", text: t.otpConfirm });
+    const codeForm = el("form", {}, [
+      el("p", { style: "margin:0 0 4px;color:var(--text-2);font-size:.9rem;text-align:center", text: t.otpSentTo }),
+      el("div", { style: "font-weight:800;direction:ltr;text-align:center;margin:0 0 12px", text: e164 }),
+      el("div.field", {}, [el("label", { text: t.otpCodeLabel }), codeI]),
+      cErr, confirmBtn,
+      el("div", { style: "text-align:center;margin-top:10px" }, [
+        el("button.link-btn", {
+          type: "button", text: "← " + t.otpBack,
+          onclick: () => { clearPhoneRecaptcha(); submit.disabled = false; submit.textContent = t.regSubmit; mount(stepHost, form); },
+        }),
+      ]),
+      el("div", { style: "text-align:center;margin-top:6px" }, [
+        el("button.link-btn", {
+          type: "button", text: t.otpSkip, title: t.otpSkipHint,
+          onclick: async () => {
+            try { await doRegister(data); }
+            catch (e2) { console.error(e2); showCErr(e2.message || t.errorGeneric); }
+          },
+        }),
+      ]),
+    ]);
+    codeForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault(); cErr.hidden = true;
+      const code = codeI.value.trim();
+      if (code.length < 4) return showCErr(t.otpWrong);
+      confirmBtn.disabled = true; confirmBtn.textContent = t.loading;
+      try {
+        const user = await confirmPhoneCode(confirmation, code);
+        await afterPhoneUser(user, data);
+      } catch (e2) {
+        console.error(e2);
+        confirmBtn.disabled = false; confirmBtn.textContent = t.otpConfirm;
+        if (e2?.code === "auth/invalid-verification-code") showCErr(t.otpWrong);
+        else if (e2?.code === "auth/code-expired") showCErr(t.otpExpired);
+        else showCErr(e2.message || t.errorGeneric);
+      }
+    });
+    mount(stepHost, codeForm);
+    codeI.focus();
+  }
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault(); err.hidden = true;
@@ -703,23 +794,110 @@ function openRegisterModal(comp, state, isEdit) {
     if (phone.length < 3 && email.length < 3) return showErr(t.regContactRequired);
     const age = ageRaw === "" ? null : parseInt(ageRaw, 10);
     if (age != null && !(age >= 5 && age <= 120)) return showErr(t.regAgeInvalid);
+    const data = { name, phone, email, age };
     submit.disabled = true; submit.textContent = t.loading;
     try {
       if (isEdit) {
-        await updateMyPredictor(comp, currentUid(), { name, phone, email, age });
+        await updateMyPredictor(comp, currentUid(), data);
         toast(t.infoUpdated, "ok");
-      } else {
-        await registerPredictor(comp, { name, phone, email, age });
-        state.predSubTab = "mine";             // بعد الانضمام: انتقل مباشرةً لإدخال التوقّعات
-        toast(t.regDone, "ok");
+        finish();
+        return;
       }
-      close();                                 // onSnapshot يعيد رسم التبويب بالحالة الجديدة
+      // مسار توثيق الهاتف: رقم بصيغة صالحة والوضع مفعّل — وإلا المسار المجهول القديم
+      const e164 = (phoneOtpMode() !== "off" && phone) ? toE164(phone) : null;
+      if (e164) {
+        try {
+          const confirmation = await startPhoneAuth(e164, recaptchaHost);
+          showCodeStep(confirmation, data, e164);
+          return;
+        } catch (e2) {
+          const otpOff = ["auth/operation-not-allowed", "auth/admin-restricted-operation",
+                          "auth/configuration-not-found", "auth/billing-not-enabled"];
+          if (!otpOff.includes(e2?.code)) {
+            console.error(e2);
+            submit.disabled = false; submit.textContent = t.regSubmit;
+            if (e2?.code === "auth/invalid-phone-number") return showErr(t.otpPhoneInvalid);
+            if (e2?.code === "auth/too-many-requests") return showErr(t.otpTooMany);
+            return showErr(e2.message || t.errorGeneric);
+          }
+          // مزوّد الهاتف غير مفعّل في Firebase → نتابع بالتسجيل المجهول بهدوء
+          console.warn("Phone OTP unavailable — falling back to anonymous:", e2?.code);
+        }
+      }
+      await doRegister(data);
     } catch (e2) {
       console.error(e2);
       submit.disabled = false; submit.textContent = isEdit ? t.save : t.regSubmit;
       // رسالة واضحة إن لم يُفعَّل الدخول المجهول في إعدادات Firebase
       const anonOff = ["auth/operation-not-allowed", "auth/admin-restricted-operation", "auth/configuration-not-found"];
       showErr(anonOff.includes(e2?.code) ? t.anonDisabled : (e2.message || t.errorGeneric));
+    }
+  });
+}
+
+// استعادة مشاركة موثّقة بالهاتف من جهاز جديد: OTP ثم التحقّق من وجود تسجيل سابق
+function openRecoverModal(comp, state, rerender) {
+  const phoneI = el("input.input", { type: "tel", maxlength: "40", placeholder: t.regPhonePlaceholder, style: "direction:ltr;text-align:end" });
+  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
+  const showErr = (m) => { err.hidden = false; err.textContent = m; };
+  const recaptchaHost = el("div");
+  const sendBtn = el("button.btn.btn-primary.btn-block", { type: "submit", text: t.otpSendCode });
+  const form = el("form", {}, [
+    el("p", { style: "margin:0 0 12px;color:var(--text-2);font-size:.9rem", text: t.recoverIntro }),
+    el("div.field", {}, [el("label", { text: t.regPhone }), phoneI]),
+    err, sendBtn, recaptchaHost,
+  ]);
+  const stepHost = el("div", {}, [form]);
+  const close = openModal({ title: "📱 " + t.recoverTitle, body: stepHost, onDismiss: () => clearPhoneRecaptcha() });
+  const finish = () => { clearPhoneRecaptcha(); close(); };
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault(); err.hidden = true;
+    const e164 = toE164(phoneI.value.trim());
+    if (!e164) return showErr(t.otpPhoneInvalid);
+    sendBtn.disabled = true; sendBtn.textContent = t.loading;
+    try {
+      const confirmation = await startPhoneAuth(e164, recaptchaHost);
+      const codeI = el("input.input", {
+        type: "text", inputmode: "numeric", maxlength: "8", autocomplete: "one-time-code",
+        style: "direction:ltr;text-align:center;letter-spacing:4px;font-weight:700",
+      });
+      const cErr = el("div.alert.alert-error", { hidden: true, role: "alert" });
+      const showCErr = (m) => { cErr.hidden = false; cErr.textContent = m; };
+      const confirmBtn = el("button.btn.btn-primary.btn-block", { type: "submit", text: t.otpConfirm });
+      const codeForm = el("form", {}, [
+        el("p", { style: "margin:0 0 4px;color:var(--text-2);font-size:.9rem;text-align:center", text: t.otpSentTo }),
+        el("div", { style: "font-weight:800;direction:ltr;text-align:center;margin:0 0 12px", text: e164 }),
+        el("div.field", {}, [el("label", { text: t.otpCodeLabel }), codeI]),
+        cErr, confirmBtn,
+      ]);
+      codeForm.addEventListener("submit", async (ev) => {
+        ev.preventDefault(); cErr.hidden = true;
+        confirmBtn.disabled = true; confirmBtn.textContent = t.loading;
+        try {
+          const user = await confirmPhoneCode(confirmation, codeI.value.trim());
+          const mine = await fetchMyPredictor(comp.id, user.uid).catch(() => null);
+          if (mine) { state.predSubTab = "mine"; toast(t.recoverDone, "ok"); finish(); rerender?.(); }
+          else { confirmBtn.disabled = false; confirmBtn.textContent = t.otpConfirm; showCErr(t.recoverNotFound); }
+        } catch (e2) {
+          console.error(e2);
+          confirmBtn.disabled = false; confirmBtn.textContent = t.otpConfirm;
+          if (e2?.code === "auth/invalid-verification-code") showCErr(t.otpWrong);
+          else if (e2?.code === "auth/code-expired") showCErr(t.otpExpired);
+          else showCErr(e2.message || t.errorGeneric);
+        }
+      });
+      mount(stepHost, codeForm);
+      codeI.focus();
+    } catch (e2) {
+      console.error(e2);
+      sendBtn.disabled = false; sendBtn.textContent = t.otpSendCode;
+      const otpOff = ["auth/operation-not-allowed", "auth/admin-restricted-operation",
+                      "auth/configuration-not-found", "auth/billing-not-enabled"];
+      if (otpOff.includes(e2?.code)) showErr(t.otpUnavailable);
+      else if (e2?.code === "auth/invalid-phone-number") showErr(t.otpPhoneInvalid);
+      else if (e2?.code === "auth/too-many-requests") showErr(t.otpTooMany);
+      else showErr(e2.message || t.errorGeneric);
     }
   });
 }

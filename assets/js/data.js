@@ -3,7 +3,7 @@
 //  الأسماء المُصدَّرة ثابتة كي تبقى بقية الواجهة كما هي.
 // ============================================================================
 import { db, auth } from "./firebase.js";
-import { OWNER_EMAILS } from "./config.js";
+import { OWNER_EMAILS, PHONE_DEFAULT_CC, PHONE_OTP } from "./config.js";
 import {
   collection, doc, getDoc, getDocs, query, where,
   addDoc, setDoc, updateDoc, deleteDoc, writeBatch, onSnapshot,
@@ -14,6 +14,8 @@ import {
   sendEmailVerification, sendPasswordResetEmail,
   GoogleAuthProvider, signInWithPopup, signInAnonymously,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
+  RecaptchaVerifier, PhoneAuthProvider, signInWithPhoneNumber, linkWithPhoneNumber,
+  signInWithCredential, linkWithCredential,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
 
@@ -214,7 +216,16 @@ export async function signIn(email, password) {
 
 // تسجيل جديد: إنشاء حساب + رسالة تأكيد البريد + وثيقة في users (تظهر لمانحي الصلاحيات)
 export async function signUp(email, password, name) {
-  const cred = await createUserWithEmailAndPassword(auth, String(email || "").trim(), password);
+  const addr = String(email || "").trim();
+  // لو على هذا المتصفّح حساب بلا بريد (متوقّع مجهول أو موثَّق بهاتف): نربط البريد
+  // بالحساب نفسه بدل إنشاء حساب جديد — فيبقى uid كما هو ولا تضيع مشاركته في المسابقة
+  let cred;
+  const cur = auth.currentUser;
+  if (cur && !cur.email) {
+    cred = await linkWithCredential(cur, EmailAuthProvider.credential(addr, password));
+  } else {
+    cred = await createUserWithEmailAndPassword(auth, addr, password);
+  }
   const displayName = (name || "").trim().slice(0, 60);
   try { if (displayName) await updateProfile(cred.user, { displayName }); } catch {}
   // تأكيد البريد إلزامي لأي صلاحية كتابة (تفرضه firestore.rules)
@@ -881,6 +892,70 @@ export async function ensureAnon() {
 // معرّف المستخدم الحالي إن وُجد (بلا إنشاء حساب جديد) — لفحص «هل أنا مشارك؟»
 export function currentUid() { return auth?.currentUser?.uid || null; }
 
+// ---- توثيق هاتف المتوقّع (OTP عبر SMS) --------------------------------------
+//  الهدف: هويّة محمولة عبر الأجهزة (بدل الحساب المجهول المربوط بالمتصفّح):
+//  • جهاز جديد: دخول بالهاتف يعيد نفس الحساب → نفس المشاركة والتوقّعات.
+//  • مشارك واحد لكل رقم (الرقم لا يُربط إلا بحساب واحد في Firebase).
+//  التفعيل: مزوّد Phone في Firebase Authentication. غير مفعّل؟ يتراجع التسجيل
+//  تلقائياً للوضع المجهول القديم (لا شيء ينكسر).
+
+export function phoneOtpMode() { return PHONE_OTP; }
+
+// تحويل رقم محلي (05xxxxxxxx) إلى الصيغة الدولية E.164 — null إن تعذّر
+export function toE164(raw, cc = PHONE_DEFAULT_CC) {
+  let s = String(raw || "").replace(/[\s\-().]/g, "");
+  if (!s) return null;
+  if (s.startsWith("00")) s = "+" + s.slice(2);
+  if (!s.startsWith("+")) {
+    if (!s.startsWith("0")) return null;   // بلا صفر بادئ ولا +: صيغة غامضة — نرفض
+    s = cc + s.slice(1);
+  }
+  return /^\+[1-9]\d{6,14}$/.test(s) ? s : null;
+}
+
+// reCAPTCHA غير المرئي المطلوب لهاتف Firebase — واحد حيّ في كل لحظة
+let phoneRecaptcha = null, phoneRecaptchaHost = null;
+export function clearPhoneRecaptcha() {
+  try { phoneRecaptcha?.clear(); } catch {}
+  phoneRecaptcha = null; phoneRecaptchaHost = null;
+}
+
+// يبدأ إرسال رمز التحقّق. إن كان على المتصفّح حساب بلا هاتف (مجهول عادةً) نربط
+// الهاتف به — فيحتفظ بنفس uid وكل توقّعاته. وإلا ندخل بالهاتف مباشرةً.
+export async function startPhoneAuth(e164, container) {
+  if (!auth) throw new Error("Firebase not configured");
+  await authReady;
+  auth.languageCode = "ar";
+  if (!phoneRecaptcha || phoneRecaptchaHost !== container) {
+    clearPhoneRecaptcha();
+    phoneRecaptcha = new RecaptchaVerifier(auth, container, { size: "invisible" });
+    phoneRecaptchaHost = container;
+  }
+  try {
+    const u = auth.currentUser;
+    if (u && !u.phoneNumber) return await linkWithPhoneNumber(u, e164, phoneRecaptcha);
+    return await signInWithPhoneNumber(auth, e164, phoneRecaptcha);
+  } catch (e) {
+    clearPhoneRecaptcha();   // الـ verifier يُستهلك عند الفشل — ننظّفه لإعادة المحاولة
+    throw e;
+  }
+}
+
+// تأكيد الرمز. لو كان الرقم مربوطاً بحساب آخر (مشارك قديم من جهاز جديد)
+// ندخل إلى ذلك الحساب بنفس الرمز — فتعود مشاركته كما كانت.
+export async function confirmPhoneCode(confirmation, code) {
+  try {
+    return (await confirmation.confirm(code)).user;
+  } catch (e) {
+    if (e?.code === "auth/credential-already-in-use"
+        || e?.code === "auth/account-exists-with-different-credential") {
+      const cred = PhoneAuthProvider.credential(confirmation.verificationId, code);
+      return (await signInWithCredential(auth, cred)).user;
+    }
+    throw e;
+  }
+}
+
 // ---- المسابقات (pcomps) ----------------------------------------------------
 
 const compDefaults = () => ({ pts_exact: 5, pts_diff: 3, pts_outcome: 2, winners_count: 3, predictions_open: false });
@@ -921,6 +996,9 @@ export async function registerPredictor(comp, { name, phone, email, age }) {
   const uid = user.uid;
   const id = predKey(comp.id, uid);
   const base = { competition_id: comp.id, tournament_id: comp.tournament_id, uid, created_at: Date.now() };
+  // إن وثّق هاتفه بـ OTP نخزّن الرقم الموثّق نفسه (القواعد تشترط تطابقه مع التوكن)
+  const tokenPhone = user.phoneNumber || null;
+  const phoneStr = tokenPhone || (phone ? String(phone).trim().slice(0, 40) : null);
   // كتابة ذرّية: إمّا الوثيقتان معاً (اسم عامّ + تواصل خاصّ) أو لا شيء — لا حالة نصفيّة
   const d = requireDb();
   const b = writeBatch(d);
@@ -929,7 +1007,8 @@ export async function registerPredictor(comp, { name, phone, email, age }) {
   }));
   b.set(doc(d, "predictorContacts", id), clean({
     ...base,
-    phone: phone ? String(phone).trim().slice(0, 40) : null,
+    phone: phoneStr,
+    phone_verified: !!tokenPhone,
     email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
@@ -940,9 +1019,13 @@ export async function registerPredictor(comp, { name, phone, email, age }) {
 // تعديل اسم المشارك ووثيقة تواصله
 export async function updateMyPredictor(comp, uid, { name, phone, email, age }) {
   const id = predKey(comp.id, uid);
+  const phoneStr = phone ? String(phone).trim().slice(0, 40) : null;
+  // «موثّق» فقط إن بقي الرقم المعروض هو رقم الحساب الموثّق نفسه
+  const tokenPhone = auth?.currentUser?.phoneNumber || null;
   await updateDoc(doc(requireDb(), "predictors", id), { name: String(name || "").trim().slice(0, 60) });
   await updateDoc(doc(requireDb(), "predictorContacts", id), clean({
-    phone: phone ? String(phone).trim().slice(0, 40) : null,
+    phone: phoneStr,
+    phone_verified: !!tokenPhone && phoneStr === tokenPhone,
     email: email ? String(email).trim().toLowerCase().slice(0, 120) : null,
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));

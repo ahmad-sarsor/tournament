@@ -43,8 +43,8 @@ function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTi
 applyPrefs();
 document.getElementById("settings-btn")?.addEventListener("click", () => openSettings({ isAdmin: true }));
 
-// المتوقّعون يسجّلون مجهولين (Anonymous) — لا يُعدّون جلسة منظّم في هذه اللوحة
-const realSession = (s) => (s && s.user && !s.user.isAnonymous) ? s : null;
+// المتوقّعون (مجهولون أو موثَّقون بهاتف فقط، بلا بريد) لا يُعدّون جلسة منظّم في هذه اللوحة
+const realSession = (s) => (s && s.user && !s.user.isAnonymous && s.user.email) ? s : null;
 
 async function boot() {
   if (!isConfigured) return renderSetupNeeded();
@@ -655,11 +655,17 @@ async function renderPredictionsAdmin(host, state) {
   if (!comps.length) wrap.appendChild(emptyState("🎯", t.noCompetitions));
 
   for (const c of comps) {
+    // عدّاد مشاركين حيّ على البطاقة — يُملأ فور جلب المتوقّعين (للمنظّم نظرة سريعة)
+    const cnt = el("div.pc-adm-sub", { text: "👥 …" });
+    api.fetchPredictors(c.id)
+      .then((list) => { cnt.textContent = `👥 ${t.compParticipants}: ${list.length}`; })
+      .catch(() => { cnt.textContent = ""; });
     wrap.appendChild(el("div.pc-adm-card" + (c.status === "open" ? ".is-open" : ""), {}, [
       el("div.pc-adm-cardhead", {}, [
         el("div.grow", {}, [
           el("div.pc-adm-title", {}, [el("span", { text: c.title || t.predictionComp }), compStatusBadgeAdmin(c.status)]),
           el("div.pc-adm-sub", { text: scoringSummary(c) }),
+          cnt,
           (c.status === "draft") ? el("div.pc-adm-hintline", { text: "• " + t.pcDraftHint }) : null,
         ]),
         el("div.pc-adm-icons", {}, [
@@ -870,7 +876,7 @@ async function participantsModal(comp, tournament) {
         return el("tr" + (r.rank === 1 ? ".champion" : ""), {}, [
           el("td", {}, [el("span.rank", { text: String(r.rank) })]),
           el("td.team-col", {}, [el("span.team-name", { text: r.predictor.name || "—" })]),
-          el("td", { style: "direction:ltr;text-align:start", text: c.phone || "—" }),
+          el("td", { style: "direction:ltr;text-align:start", text: (c.phone || "—") + (c.phone_verified ? " ✓" : "") }),
           el("td", { style: "direction:ltr;text-align:start;font-size:.8rem", text: c.email || "—" }),
           el("td", { text: c.age != null ? String(c.age) : "—" }),
           el("td", {}, [el("span.pts", { text: String(r.points) })]),
@@ -879,10 +885,10 @@ async function participantsModal(comp, tournament) {
     ])]);
 
     const exportBtn = el("button.btn.btn-sm.btn-primary", { type: "button", text: "⬇ " + t.exportCsv, onclick: () => {
-      const rows = [[t.th_rank, t.regName, t.th_phone, t.email, t.th_age, t.th_pts_total, t.th_exactCol, t.th_hitsCol, t.th_joinedAt]];
+      const rows = [[t.th_rank, t.regName, t.th_phone, t.phoneVerifiedMark, t.email, t.th_age, t.th_pts_total, t.th_exactCol, t.th_hitsCol, t.th_joinedAt]];
       for (const r of standings) {
         const c = contactByUid.get(r.predictor.uid) || {};
-        rows.push([r.rank, r.predictor.name || "", c.phone || "", c.email || "", c.age ?? "",
+        rows.push([r.rank, r.predictor.name || "", c.phone || "", c.phone_verified ? "✓" : "", c.email || "", c.age ?? "",
           r.points, r.exact, r.hits, c.created_at ? fmtWhen(c.created_at) : ""]);
       }
       const safe = String(comp.title || "predictions").replace(/[\\/:*?"<>|]/g, "-").slice(0, 40);

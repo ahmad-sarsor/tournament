@@ -368,16 +368,21 @@ service cloud.firestore {
         && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() <= 40))
         && (!('email' in d) || d.email == null || (d.email is string && d.email.size() <= 120))
         && (!('age' in d) || d.age == null || (d.age is int && d.age >= 3 && d.age <= 120))
+        && (!('phone_verified' in d) || d.phone_verified is bool)
+        // «هاتف موثّق» لا يُدَّعى: يُقبل true فقط إن طابق الرقمُ هاتفَ الحساب الموثّق (OTP)
+        && (d.get('phone_verified', false) == false
+            || (request.auth != null
+                && request.auth.token.get('phone_number', '') == d.get('phone', '')))
         && okOptNum(d, 'created_at');
     }
     match /predictorContacts/{id} {
       allow read: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
       allow create: if isSelf(request.resource.data.uid)
-        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'phone', 'email', 'age', 'created_at'])
+        && request.resource.data.keys().hasOnly(['competition_id', 'tournament_id', 'uid', 'phone', 'email', 'age', 'phone_verified', 'created_at'])
         && contactValuesOk(request.resource.data)
         && joinOpen(request.resource.data.competition_id, request.resource.data.tournament_id);
       allow update: if isSelf(resource.data.uid)
-        && changedKeys().hasOnly(['phone', 'email', 'age'])
+        && changedKeys().hasOnly(['phone', 'email', 'age', 'phone_verified'])
         && contactValuesOk(request.resource.data);
       allow delete: if isSelf(resource.data.uid) || parentManages(resource.data.tournament_id);
     }
