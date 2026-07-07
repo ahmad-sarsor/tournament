@@ -11,6 +11,7 @@ import {
   fetchCompetitionsByTournament, subscribeCompetition, getCompCache,
   fetchMyContact, fetchMyPredictor, registerPredictor, updateMyPredictor, savePrediction,
   computePredictionStandings, compScoring, isPredictable, predictionPoints, currentUid,
+  isNoEmailAuthEmail,
 } from "./data.js";
 import { renderScheduleDays, standingsTable, eventsTimeline, renderBracket, predictionBoard, shareCompetitionFlow } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
@@ -54,8 +55,7 @@ function isSignedPlatformUser(u) {
   return !!(u && !u.isAnonymous && u.email);
 }
 function hasReadyPlatformUser() {
-  const u = session?.user;
-  return !!(isSignedPlatformUser(u) && u.emailVerified);
+  return !!currentUid();
 }
 function accountLabel(u = session?.user) {
   return String(u?.displayName || u?.email || "").trim();
@@ -67,17 +67,18 @@ function goToPlatformAuth() {
 function openAccountRequiredModal() {
   const u = session?.user;
   const signed = isSignedPlatformUser(u);
-  const title = signed ? t.verifyAccountTitle : t.accountRequiredTitle;
-  const body = signed ? t.verifyAccountBody : t.accountRequiredBody;
+  const noEmail = signed && isNoEmailAuthEmail(u.email);
+  const title = !signed ? t.accountRequiredTitle : (noEmail ? t.approvalRequiredTitle : t.verifyAccountTitle);
+  const body = !signed ? t.accountRequiredBody : (noEmail ? t.approvalRequiredBody : t.verifyAccountBody);
   const close = openModal({
     title,
     body: el("div", {}, [
       el("p", { style: "margin:0 0 14px;color:var(--text-2);line-height:1.7", text: body }),
-      signed ? el("div", { style: "font-weight:800;direction:ltr;text-align:center;margin-bottom:12px", text: u.email || "" }) : null,
+      signed ? el("div", { style: "font-weight:800;direction:ltr;text-align:center;margin-bottom:12px", text: noEmail ? accountLabel(u) : (u.email || "") }) : null,
       el("button.btn.btn-primary.btn-block", {
         type: "button",
-        text: signed ? t.verifyAccountBtn : t.loginToJoin,
-        onclick: () => { close(); goToPlatformAuth(); },
+        text: !signed ? t.loginToJoin : (noEmail ? t.okGotIt : t.verifyAccountBtn),
+        onclick: () => { close(); if (!noEmail) goToPlatformAuth(); },
       }),
     ]),
   });
@@ -85,6 +86,7 @@ function openAccountRequiredModal() {
 function contestAuthMsg(err) {
   if (err?.code === "auth/login-required") return t.accountRequiredError;
   if (err?.code === "auth/email-not-verified") return t.verifyBeforeJoin;
+  if (err?.code === "auth/approval-required") return t.approvalRequiredBody;
   return err?.message || t.errorGeneric;
 }
 
@@ -544,6 +546,7 @@ function renderCompView(root, state, comp, comps, live, rerender) {
   const teamById = new Map(state.bundle.teams.map((x) => [x.id, x]));
   const uid = currentUid();
   const signedAccount = isSignedPlatformUser(session?.user);
+  const noEmailAccount = signedAccount && isNoEmailAuthEmail(session.user.email);
   const readyAccount = hasReadyPlatformUser();
   const myPredictor = uid ? live.predictors.find((p) => p.uid === uid) : null;
   const myPredictions = uid ? live.predictions.filter((p) => p.uid === uid) : [];
@@ -605,7 +608,7 @@ function renderCompView(root, state, comp, comps, live, rerender) {
         ])
       : (comp.status === "open"
           ? el("div.pc-join-row", {}, [
-              el("span.pc-join-txt", { text: readyAccount ? t.registerIntro : (signedAccount ? t.verifyBeforeJoin : t.accountRequiredJoinHint) }),
+              el("span.pc-join-txt", { text: readyAccount ? t.registerIntro : (signedAccount ? (noEmailAccount ? t.approvalRequiredBody : t.verifyBeforeJoin) : t.accountRequiredJoinHint) }),
               el("button.btn.pc-btn", {
                 text: readyAccount ? ("🎯 " + t.joinCompetition) : t.loginToJoin,
                 onclick: () => readyAccount ? openRegisterModal(comp, state, false, rerender) : openAccountRequiredModal(),
@@ -1010,7 +1013,8 @@ async function managerContext() {
   session = s;
   renderAuthLink();
   const u = s?.user;
-  if (!u || !u.email || !u.emailVerified) return null;   // الكتابة تتطلّب بريداً موثَّقاً
+  if (u) await syncMyUserDoc(u).catch(() => {});
+  if (!u || !u.email || !u.emailVerified || isNoEmailAuthEmail(u.email)) return null;
   return { email: u.email.toLowerCase(), platformAdmin: isOwnerEmail(u.email) || await amIPlatformAdmin() };
 }
 // هل يملك صاحب هذا السياق صلاحية على التورنير؟ (تحقّق متزامن)

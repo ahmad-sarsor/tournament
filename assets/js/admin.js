@@ -14,16 +14,21 @@ let session = null;
 // أدوار المستخدم الحالي: مالك المنصّة / مدير منصّة / عضو معتمَد (تُحدَّث مع كل تغيّر مصادقة)
 let isOwnerUser = false, isPlatformAdminUser = false, isMemberUser = false;
 const myEmail = () => session?.user?.email || null;
-const myEmailLow = () => (session?.user?.email || "").toLowerCase() || null;
+const myUid = () => session?.user?.uid || null;
+const myEmailLow = () => {
+  const email = (session?.user?.email || "").toLowerCase();
+  return email && !api.isNoEmailAuthEmail(email) ? email : null;
+};
 // هل يملك المستخدم صلاحية إدارة هذا التورنير؟ (منصّة، أو مالكه، أو مدير معيّن فيه)
 function canEditTournament(tr) {
   if (!tr) return false;
   if (isPlatformAdminUser) return true;
   const e = myEmailLow();
-  if (!e) return false;
+  const uid = myUid();
   // كل العناوين بحروف صغيرة (owner_email من Firebase، والقوائم من الواجهة والقواعد)
-  return String(tr.owner_email || "").toLowerCase() === e
-    || (Array.isArray(tr.admin_emails) && tr.admin_emails.includes(e));
+  return (!!uid && tr.owner_uid === uid)
+    || (!!e && String(tr.owner_email || "").toLowerCase() === e)
+    || (!!e && Array.isArray(tr.admin_emails) && tr.admin_emails.includes(e));
 }
 // صلاحية تسجيل النتائج: كل من يدير، أو المعيَّن في scorer_emails
 function canScoreTournament(tr) {
@@ -96,7 +101,7 @@ let autoFinishing = false;
 
 async function autoFinishStale() {
   // يتطلّب بريداً مُوثَّقاً (شرط الكتابة في القواعد)، ولا فحصين متزامنين
-  if (!session || !session.user.emailVerified || autoFinishing) return;
+  if (!session || !session.user.emailVerified || api.isNoEmailAuthEmail(session.user.email) || autoFinishing) return;
   autoFinishing = true;
   try {
     // نحدّد نطاق الصلاحية أوّلاً: مدير المنصّة = كل التورنيرات؛ غيره = ما يديره/يسجّل فيه
@@ -165,7 +170,7 @@ async function route() {
   if (!isConfigured) return renderSetupNeeded();
   if (!session) return renderLogin();
   // بريد غير مُوثَّق: لا صلاحيات كتابة — نطالب بتأكيد البريد أولاً
-  if (!session.user.emailVerified) { clear(userBox); renderUserBox(); return renderVerifyEmail(); }
+  if (!session.user.emailVerified && !api.isNoEmailAuthEmail(session.user.email)) { clear(userBox); renderUserBox(); return renderVerifyEmail(); }
   const authReturn = consumeAuthReturn();
   if (authReturn) { location.href = authReturn; return; }
   const r = parseHash();
@@ -203,8 +208,15 @@ function renderLogin() {
     const errBox = el("div.alert.alert-error", { hidden: true, role: "alert" });
     const showErr = (msg) => { errBox.hidden = false; errBox.textContent = msg; };
 
-    const name = el("input.input", { id: "reg-name", type: "text", autocomplete: "name", maxlength: "60", placeholder: t.usernamePlaceholder });
-    const email = el("input.input", { id: "login-email", type: "email", autocomplete: "username", required: true, style: "direction:ltr;text-align:end" });
+    const username = el("input.input", {
+      id: "reg-username", type: "text", autocomplete: "username", maxlength: "24",
+      placeholder: t.usernamePlaceholder, style: "direction:ltr;text-align:end",
+    });
+    const email = el("input.input", {
+      id: "login-email", type: isSignup ? "email" : "text", autocomplete: "username",
+      required: !isSignup, style: "direction:ltr;text-align:end",
+      placeholder: isSignup ? t.emailOptionalPlaceholder : t.loginIdentifierPlaceholder,
+    });
     const pass = el("input.input", {
       id: "login-pass", type: "password", required: true, style: "direction:ltr;text-align:end",
       autocomplete: isSignup ? "new-password" : "current-password", ...(isSignup ? { minlength: "8" } : {}),
@@ -243,7 +255,7 @@ function renderLogin() {
       onclick: async () => {
         const addr = email.value.trim();
         errBox.hidden = true;
-        if (!addr) return showErr(t.enterEmailFirst);
+        if (!addr || !addr.includes("@")) return showErr(t.enterEmailFirst);
         try { await api.sendReset(addr); toast(t.resetSent, "ok"); }
         catch (err) {
           if (err?.code === "auth/invalid-email") return showErr(t.authErrors["auth/invalid-email"]);
@@ -253,8 +265,16 @@ function renderLogin() {
     });
 
     const fields = [];
-    if (isSignup) fields.push(el("div.field", {}, [el("label", { text: t.username, for: "reg-name" }), name]));
-    fields.push(el("div.field", {}, [el("label", { text: t.email, for: "login-email" }), email]));
+    if (isSignup) fields.push(el("div.field", {}, [
+      el("label", { text: t.username, for: "reg-username" }),
+      username,
+      el("div.field-hint", { text: t.usernameHint }),
+    ]));
+    fields.push(el("div.field", {}, [
+      el("label", { text: isSignup ? t.emailOptional : t.loginIdentifier, for: "login-email" }),
+      email,
+      isSignup ? el("div.field-hint", { text: t.emailOptionalHint }) : null,
+    ]));
     fields.push(el("div.field", {}, [
       el("label", { text: t.password, for: "login-pass" }), passWrap,
       isSignup ? el("div.field-hint", { text: t.passwordHint }) : null,
@@ -267,12 +287,17 @@ function renderLogin() {
       e.preventDefault();
       errBox.hidden = true;
       const addr = email.value.trim();
+      const uname = username.value.trim();
       // تحقّق محلّي سريع قبل الشبكة
-      if (!addr) return showErr(t.invalidEmail);
+      if (isSignup && !api.usernameValid(uname)) return showErr(t.usernameInvalid);
+      if (!isSignup && !addr) return showErr(t.loginIdentifierRequired);
       if (isSignup && pass.value.length < 8) return showErr(t.weakPasswordLocal);
       btn.disabled = true; btn.textContent = t.loading;
       try {
-        if (isSignup) { await api.signUp(addr, pass.value, name.value.trim()); toast(t.verifySent, "ok"); }
+        if (isSignup) {
+          await api.signUp(addr, pass.value, uname);
+          toast(addr ? t.verifySent : t.pendingApprovalSignup, "ok");
+        }
         else await api.signIn(addr, pass.value);
         // onAuthChange يتكفّل بالتوجيه (لغير المؤكَّدين → شاشة التأكيد)
       } catch (err) {
@@ -383,6 +408,7 @@ function renderVerifyEmail() {
 function accountModal() {
   if (!session) return;
   const u = session.user;
+  const noEmail = api.isNoEmailAuthEmail(u.email);
 
   const nameInput = el("input.input", { type: "text", maxlength: "60", value: u.displayName || "" });
   const saveName = el("button.btn.btn-primary", { type: "button", text: t.save });
@@ -396,7 +422,7 @@ function accountModal() {
   const body = el("div", {}, [
     el("div.field", {}, [
       el("label", { text: t.email }),
-      el("input.input", { type: "email", value: u.email || "", disabled: true, style: "direction:ltr;text-align:end;opacity:.75" }),
+      el("input.input", { type: "text", value: noEmail ? t.noEmailAccount : (u.email || ""), disabled: true, style: "direction:ltr;text-align:end;opacity:.75" }),
     ]),
     el("div.field", {}, [el("label", { text: t.displayNameLbl }), nameInput]),
     el("div", { style: "margin-bottom:6px" }, [saveName]),
@@ -462,7 +488,7 @@ async function renderHome() {
   }
   for (const tr of tournaments) {
     const canEdit = canEditTournament(tr);
-    const isTOwner = String(tr.owner_email || "").toLowerCase() === myEmailLow();
+    const isTOwner = (!!myUid() && tr.owner_uid === myUid()) || (!!myEmailLow() && String(tr.owner_email || "").toLowerCase() === myEmailLow());
     const canDelete = isPlatformAdminUser || isTOwner;
     const subParts = [statusLabel(tr.status), tr.start_date ? formatDate(tr.start_date) : null].filter(Boolean);
     if (!canEdit) subParts.push("🎯 " + t.roleScorer); // مسجِّل نتائج فقط
@@ -531,7 +557,7 @@ async function renderUsersAdmin() {
   const [users, adminSet, memberSet] = await Promise.all([
     api.fetchUsers(), api.fetchAdminEmails(), api.fetchMemberEmails(),
   ]);
-  const verifiedCount = users.filter((u) => u.verified === true).length;
+  const verifiedCount = users.filter((u) => u.verified === true || u.approved === true).length;
   const head = el("div.page-head", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" }, [
     el("a.btn.btn-sm.btn-outline", { href: "#/", text: "→ " + t.tournaments }),
     el("h1.page-title", { style: "margin:0", text: "👥 " + t.usersAdmin }),
@@ -544,37 +570,41 @@ async function renderUsersAdmin() {
   const renderList = () => {
     const q = search.value.trim().toLowerCase();
     const shown = q
-      ? users.filter((u) => (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q))
+      ? users.filter((u) => (u.name || "").toLowerCase().includes(q) || (u.username || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q))
       : users;
     clear(list);
     if (!shown.length) { list.appendChild(emptyState("👥", q ? "لا نتائج" : t.noUsers)); return; }
     for (const u of shown) {
       const em = (u.email || "").toLowerCase();
-      const owner = api.isOwnerEmail(u.email);
+      const noEmail = u.no_email === true || !em;
+      const owner = !!em && api.isOwnerEmail(u.email);
       const padmin = owner || adminSet.has(em);          // مدير منصّة
-      const member = padmin || memberSet.has(em);        // عضو معتمَد (المدير عضو تلقائياً)
+      const activeUser = u.verified === true || u.approved === true;
+      const member = padmin || activeUser || memberSet.has(em);        // حساب فعّال
       const roleLabel = owner ? t.roleOwner : (padmin ? t.roleAdmin : (member ? t.roleMember : t.roleUser));
       const roleCls = owner ? "badge-finished" : ((padmin || member) ? "badge-active" : "badge-upcoming");
-      // شارة توثيق البريد
+      // شارة توثيق/اعتماد الحساب
       const verifyBadge = u.verified === true
         ? el("span.badge.badge-active", { text: "✓ " + t.verifiedBadge })
-        : (u.verified === false ? el("span.badge.badge-upcoming", { text: t.notVerifiedBadge }) : null);
+        : (u.approved === true
+            ? el("span.badge.badge-active", { text: "✓ " + t.approvedBadge })
+            : el("span.badge.badge-upcoming", { text: noEmail ? t.pendingApprovalBadge : t.notVerifiedBadge }));
 
       const actions = [];
       if (!owner) {
-        if (!padmin) actions.push(memberSet.has(em)
-          ? el("button.btn.btn-sm.btn-outline", { text: t.revokeMember, onclick: () => toggleMember(u, false) })
-          : el("button.btn.btn-sm.btn-primary", { text: t.approveMember, onclick: () => toggleMember(u, true) }));
-        actions.push(adminSet.has(em)
+        if (noEmail) actions.push(u.approved === true
+          ? el("button.btn.btn-sm.btn-outline", { text: t.revokeMember, onclick: () => toggleUserApproval(u, false) })
+          : el("button.btn.btn-sm.btn-primary", { text: t.approveMember, onclick: () => toggleUserApproval(u, true) }));
+        if (em) actions.push(adminSet.has(em)
           ? el("button.btn.btn-sm.btn-danger", { text: t.removeAdminRole, onclick: () => toggleAdmin(u, false) })
           : el("button.btn.btn-sm.btn-outline", { text: t.makeAdmin, onclick: () => toggleAdmin(u, true) }));
       }
       list.appendChild(el("div.admin-list-item", {}, [
         el("div.grow", {}, [
           el("div", { style: "font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap" }, [
-            u.name || u.email, verifyBadge,
+            u.username || u.name || u.email, verifyBadge,
           ]),
-          el("div.sub", { text: [u.email, u.created_at ? fmtWhen(u.created_at) : null].filter(Boolean).join(" · ") }),
+          el("div.sub", { text: [em || t.noEmailAccount, u.created_at ? fmtWhen(u.created_at) : null].filter(Boolean).join(" · ") }),
         ]),
         el("span.badge." + roleCls, { text: roleLabel }),
         ...actions,
@@ -596,6 +626,12 @@ async function toggleAdmin(u, on) {
 async function toggleMember(u, on) {
   if (!on && !(await confirmDialog(`إلغاء اعتماد «${u.name || u.email}» كعضو (لن يُنشئ تورنيرات)؟`))) return;
   try { await api.setMember(u.email, on); toast(t.saved, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+async function toggleUserApproval(u, on) {
+  if (!on && !(await confirmDialog(`إلغاء اعتماد «${u.username || u.name}»؟`))) return;
+  try { await api.setUserApproved(u.id, on); toast(t.saved, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
@@ -1120,7 +1156,7 @@ function renderDetailsTab(host, state) {
   const row = (k, v) => el("div", { style: "display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)" }, [
     el("span", { style: "color:var(--text-2)", text: k }), el("b", { text: v }),
   ]);
-  const isTOwnerHere = String(tr.owner_email || "").toLowerCase() === myEmailLow();
+  const isTOwnerHere = (!!myUid() && tr.owner_uid === myUid()) || (!!myEmailLow() && String(tr.owner_email || "").toLowerCase() === myEmailLow());
   const canManageStaff = isPlatformAdminUser || isTOwnerHere;
   const canDelete = isPlatformAdminUser || isTOwnerHere;
   mount(host,

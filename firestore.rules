@@ -7,14 +7,12 @@ rules_version = '2';
 //   • المالك (owner): مثبَّت أدناه (بحروف صغيرة). كل الصلاحيات + اعتماد الأعضاء
 //     ومنح مدراء المنصّة.
 //   • مدير منصّة (platform admin): في admins/{email} — يدير كل التورنيرات.
-//   • عضو معتمَد (member): في members/{email} — يُنشئ تورنيرات ويملكها.
+//   • حساب فعّال: بريد مؤكّد، أو حساب بلا بريد وافق عليه المالك.
 //   • مدير تورنير: بريده في admin_emails — يدير ذلك التورنير (عدا الطاقم والحذف).
 //   • مسجِّل نتائج: بريده في scorer_emails — يعدّل نتائج/حالة المباريات
 //     ويسجّل الأحداث (أهداف/بطاقات) واللاعبين الجدد فقط.
 //
-//  🔐 لا تُمنح أي صلاحية كتابة إلا لبريد مُوثَّق (email_verified == true).
-//  هذا يمنع انتحال البريد: من يسجّل بعنوان ليس له لن يستطيع تأكيده،
-//  فلا «يرث» صلاحيات مُنحت لذلك العنوان مسبقاً.
+//  🔐 الحساب ذو البريد يتفعّل فقط بعد تأكيد البريد. الحساب بلا بريد يحتاج موافقة المالك.
 //
 //  القراءة عامّة (عرض للزوّار). النشر: Firebase Console → Firestore → Rules → Publish
 // ============================================================================
@@ -37,14 +35,26 @@ service cloud.firestore {
       return isOwner()
         || (uemail() != null && exists(/databases/$(database)/documents/admins/$(uemail())));
     }
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+    function approvedUser() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDoc(request.auth.uid).get('approved', false) == true;
+    }
+    function activeAccount() {
+      return uemail() != null || approvedUser();
+    }
     function isMember() {
-      return isPlatformAdmin()
+      return isPlatformAdmin() || activeAccount()
         || (uemail() != null && exists(/databases/$(database)/documents/members/$(uemail())));
     }
 
     // مالك التورنير (d = بيانات التورنير)
     function isTOwner(d) {
-      return uemail() != null && d.get('owner_email', '').lower() == uemail();
+      return (request.auth != null && d.get('owner_uid', '') == request.auth.uid)
+        || (uemail() != null && d.get('owner_email', '').lower() == uemail());
     }
     // إدارة تورنير: منصّة، أو مالكه، أو مدير معيّن فيه
     function canManageT(d) {
@@ -72,8 +82,8 @@ service cloud.firestore {
     function matchExists(mid) { return mid is string && exists(/databases/$(database)/documents/matches/$(mid)); }
     // مالك الطلب
     function isSelf(id) { return request.auth != null && request.auth.uid == id; }
-    // حساب منصة حقيقي: بريد موجود ومؤكّد على توكن Firebase Auth
-    function isPlatformAccount() { return uemail() != null; }
+    // حساب منصة فعّال: بريد مؤكّد أو موافقة المالك لحساب بلا بريد
+    function isPlatformAccount() { return activeAccount(); }
 
     // المفاتيح التي مسّها التعديل الحالي (للـ update فقط)
     function changedKeys() {
@@ -109,7 +119,7 @@ service cloud.firestore {
     function tournamentKeys() {
       return ['name', 'description', 'status', 'start_date', 'end_date',
               'qualifiers_per_group', 'win_points', 'draw_points', 'loss_points',
-              'owner_email', 'admin_emails', 'scorer_emails', 'sort_order', 'created_at'];
+              'owner_email', 'owner_uid', 'admin_emails', 'scorer_emails', 'sort_order', 'created_at'];
     }
     function tournamentValuesOk(d) {
       return okStr(d.get('name', ''), 120)
@@ -121,6 +131,7 @@ service cloud.firestore {
         && okOptInt(d, 'draw_points', 0, 100)
         && okOptInt(d, 'loss_points', 0, 100)
         && (!('owner_email' in d) || okStr(d.owner_email, 254))
+        && (!('owner_uid' in d) || okStr(d.owner_uid, 128))
         && okEmailList(d, 'admin_emails') && okEmailList(d, 'scorer_emails')
         && okOptNum(d, 'sort_order') && okOptNum(d, 'created_at');
     }
@@ -131,7 +142,8 @@ service cloud.firestore {
       allow create: if isMember()
         && request.resource.data.keys().hasOnly(tournamentKeys())
         && tournamentValuesOk(request.resource.data)
-        && request.resource.data.get('owner_email', '') == uemail();
+        && request.resource.data.get('owner_uid', '') == request.auth.uid
+        && (uemail() == null || request.resource.data.get('owner_email', '') == uemail());
       // التعديل: مدير التورنير فأعلى. المالك لا يتغيّر (إلا بيد مدير المنصّة
       // لإنقاذ تورنيرات قديمة بلا مالك)، وقائمتا الطاقم لا يعدّلهما
       // إلا مالك التورنير أو مدير المنصّة (لا مدراء التورنير).
@@ -266,19 +278,54 @@ service cloud.firestore {
       allow update: if false;
     }
 
-    // ---- المسجّلون: كلٌّ ينشئ/يحدّث وثيقته؛ قائمة المستخدمين لمدير المنصّة فقط ----
-    //  (لا يقرأ كامل الدليل إلا مدير المنصّة — منعاً لحصاد بُرد كل المسجَّلين؛
-    //   يقرأ كلُّ مستخدم وثيقته فقط. اقتراح الطاقم لمالكي التورنيرات يتحمّل غياب الدليل.)
+    // ---- المسجّلون: بريد مؤكّد أو اسم مستخدم بلا بريد بانتظار موافقة المالك ----
+    function userKeys() {
+      return ['email', 'auth_email', 'username', 'name', 'created_at', 'verified', 'approved', 'no_email'];
+    }
+    function userValuesOk(d) {
+      return d.get('email', '') is string && d.get('email', '').size() <= 254
+        && d.get('auth_email', '') is string && d.get('auth_email', '').size() <= 254
+        && (!('username' in d) || (d.username is string && d.username.size() >= 3 && d.username.size() <= 24))
+        && d.get('name', '') is string && d.get('name', '').size() <= 60
+        && d.get('verified', false) is bool
+        && d.get('approved', false) is bool
+        && d.get('no_email', false) is bool
+        && okOptNum(d, 'created_at');
+    }
     match /users/{userId} {
       allow read: if isPlatformAdmin() || (request.auth != null && request.auth.uid == userId);
-      allow create, update: if request.auth != null && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly(['email', 'name', 'created_at', 'verified'])
-        && request.resource.data.email is string
-        && request.resource.data.email == request.auth.token.email.lower()
-        && request.resource.data.name is string && request.resource.data.name.size() <= 60
-        && request.resource.data.get('created_at', 0) is number
-        && request.resource.data.get('verified', false) == request.auth.token.get('email_verified', false);
+      allow create: if request.auth != null && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly(userKeys())
+        && userValuesOk(request.resource.data)
+        && request.resource.data.get('username', '') is string
+        && request.resource.data.auth_email == request.auth.token.email.lower()
+        && request.resource.data.approved == (uemail() != null);
+      allow update: if (
+          request.auth != null && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(userKeys())
+          && changedKeys().hasOnly(['email', 'auth_email', 'name', 'verified', 'approved', 'no_email'])
+          && userValuesOk(request.resource.data)
+          && request.resource.data.auth_email == request.auth.token.email.lower()
+          && (!changed('approved') || (uemail() != null && request.resource.data.approved == true))
+        )
+        || (isOwner()
+          && changedKeys().hasOnly(['approved'])
+          && request.resource.data.approved is bool);
       allow delete: if isOwner();
+    }
+
+    match /usernames/{username} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'auth_email', 'email', 'created_at'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.username == username
+        && username.matches('^[a-z0-9_]{3,24}$')
+        && request.resource.data.auth_email == request.auth.token.email.lower()
+        && (!('email' in request.resource.data) || request.resource.data.email == null || request.resource.data.email is string)
+        && okOptNum(request.resource.data, 'created_at')
+        && !exists(/databases/$(database)/documents/usernames/$(username));
+      allow update, delete: if false;
     }
 
     // ---- الأعضاء المعتمَدون (يُنشئون تورنيرات) — المالك وحده يعتمد -------------
@@ -328,7 +375,7 @@ service cloud.firestore {
         && pcompValuesOk(request.resource.data)
         && request.resource.data.tournament_id is string
         && parentManages(request.resource.data.tournament_id)
-        && request.resource.data.get('owner_email', '') == uemail();
+        && (uemail() == null || request.resource.data.get('owner_email', '') == uemail());
       allow update: if parentManages(resource.data.tournament_id)
         && request.resource.data.keys().hasOnly(pcompKeys())
         && pcompValuesOk(request.resource.data)

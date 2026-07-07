@@ -14,7 +14,7 @@ import {
   sendEmailVerification, sendPasswordResetEmail,
   GoogleAuthProvider, signInWithPopup,
   updatePassword, EmailAuthProvider, reauthenticateWithCredential,
-  linkWithCredential,
+  linkWithCredential, deleteUser,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import { SAMPLE } from "./seed-data.js";
 
@@ -54,17 +54,20 @@ export async function fetchTournaments() {
 
 // التورنيرات المرتبطة بالبريد: يملكها، أو مدير فيها، أو مسجِّل نتائج فيها
 export async function fetchMyTournaments(email) {
-  if (!email) return [];
+  const u = currentUser;
+  if (!email && !u?.uid) return [];
   const d = requireDb();
-  const low = String(email).toLowerCase();
+  const low = (email && !isNoEmailAuthEmail(email)) ? String(email).toLowerCase() : "";
   // كل العناوين مخزّنة بحروف صغيرة (owner_email من Firebase، والقائمتان من الواجهة)
-  const [owned, adminOf, scorerOf] = await Promise.all([
-    getDocs(query(collection(d, "tournaments"), where("owner_email", "==", low))),
-    getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", low))),
-    getDocs(query(collection(d, "tournaments"), where("scorer_emails", "array-contains", low))),
-  ]);
+  const jobs = [
+    low ? getDocs(query(collection(d, "tournaments"), where("owner_email", "==", low))) : Promise.resolve({ docs: [] }),
+    low ? getDocs(query(collection(d, "tournaments"), where("admin_emails", "array-contains", low))) : Promise.resolve({ docs: [] }),
+    low ? getDocs(query(collection(d, "tournaments"), where("scorer_emails", "array-contains", low))) : Promise.resolve({ docs: [] }),
+    u?.uid ? getDocs(query(collection(d, "tournaments"), where("owner_uid", "==", u.uid))) : Promise.resolve({ docs: [] }),
+  ];
+  const [owned, adminOf, scorerOf, ownedByUid] = await Promise.all(jobs);
   const byId = new Map();
-  for (const doc of [...mapDocs(owned), ...mapDocs(adminOf), ...mapDocs(scorerOf)]) byId.set(doc.id, doc);
+  for (const doc of [...mapDocs(owned), ...mapDocs(adminOf), ...mapDocs(scorerOf), ...mapDocs(ownedByUid)]) byId.set(doc.id, doc);
   return [...byId.values()].sort(byTournamentOrder);
 }
 
@@ -190,12 +193,14 @@ function headToHead(cluster, matches, ids, P) {
 // ---- المصادقة (الإدارة) ----------------------------------------------------
 
 let currentUser = null;
+let currentUserDoc = null;
 const authCbs = new Set();
 let markReady;
 const authReady = new Promise((r) => (markReady = r));
 if (auth) {
   onAuthStateChanged(auth, (u) => {
     currentUser = u;
+    if (!u) currentUserDoc = null;
     if (markReady) { markReady(); markReady = null; }
     const session = u ? { user: u } : null;
     authCbs.forEach((cb) => { try { cb(session); } catch (e) { console.error(e); } });
@@ -208,14 +213,91 @@ export async function getSession() {
   return currentUser ? { user: currentUser } : null;
 }
 
-export async function signIn(email, password) {
-  const cred = await signInWithEmailAndPassword(auth, email, password);
+const NO_EMAIL_DOMAIN = "no-email.tournament.local";
+const usernameRe = /^[a-z0-9_]{3,24}$/;
+
+function normalizeUsername(username) {
+  return String(username || "").trim().toLowerCase();
+}
+
+export function usernameValid(username) {
+  return usernameRe.test(normalizeUsername(username));
+}
+
+export function isNoEmailAuthEmail(email) {
+  return String(email || "").toLowerCase().endsWith("@" + NO_EMAIL_DOMAIN);
+}
+
+function usernameAuthEmail(username) {
+  return `${normalizeUsername(username)}@${NO_EMAIL_DOMAIN}`;
+}
+
+function usernameBaseFrom(...parts) {
+  const raw = parts.filter(Boolean).join("_").toLowerCase()
+    .replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "").replace(/_+/g, "_");
+  const base = raw || "user";
+  return base.slice(0, 18).replace(/^_+|_+$/g, "") || "user";
+}
+
+async function reserveUsernameForUser(u, preferred, authEmail, realEmail) {
+  let base = normalizeUsername(preferred);
+  if (!usernameValid(base)) base = usernameBaseFrom(realEmail?.split("@")[0], u.displayName, u.uid.slice(0, 6));
+  for (let i = 0; i < 8; i++) {
+    const suffix = i === 0 ? "" : "_" + u.uid.slice(0, Math.min(6, 3 + i));
+    const candidate = (base + suffix).slice(0, 24);
+    if (!usernameValid(candidate)) continue;
+    const ref = doc(requireDb(), "usernames", candidate);
+    const existing = await getDoc(ref).catch(() => null);
+    if (existing?.exists()) {
+      if (existing.data()?.uid === u.uid) return candidate;
+      continue;
+    }
+    await setDoc(ref, clean({
+      uid: u.uid, username: candidate, auth_email: authEmail,
+      email: realEmail || null, created_at: Date.now(),
+    }));
+    return candidate;
+  }
+  const fallback = ("user_" + u.uid.slice(0, 12)).slice(0, 24);
+  await setDoc(doc(requireDb(), "usernames", fallback), clean({
+    uid: u.uid, username: fallback, auth_email: authEmail,
+    email: realEmail || null, created_at: Date.now(),
+  }));
+  return fallback;
+}
+
+async function resolveLoginIdentifier(identifier) {
+  const raw = String(identifier || "").trim();
+  if (raw.includes("@")) return raw.toLowerCase();
+  const username = normalizeUsername(raw);
+  if (!usernameValid(username)) return raw;
+  const s = await getDoc(doc(requireDb(), "usernames", username));
+  return s.exists() ? String(s.data().auth_email || "").toLowerCase() : raw;
+}
+
+export async function signIn(identifier, password) {
+  const login = await resolveLoginIdentifier(identifier);
+  const cred = await signInWithEmailAndPassword(auth, login, password);
+  try { await syncMyUserDoc(cred.user); } catch {}
   return { user: cred.user };
 }
 
 // تسجيل جديد: إنشاء حساب + رسالة تأكيد البريد + وثيقة في users (تظهر لمانحي الصلاحيات)
-export async function signUp(email, password, name) {
-  const addr = String(email || "").trim();
+export async function signUp(email, password, username) {
+  const realEmail = String(email || "").trim().toLowerCase();
+  const uname = normalizeUsername(username);
+  if (!usernameValid(uname)) {
+    const err = new Error("invalid username");
+    err.code = "app/invalid-username";
+    throw err;
+  }
+  const existingUsername = await getDoc(doc(requireDb(), "usernames", uname));
+  if (existingUsername.exists()) {
+    const err = new Error("username exists");
+    err.code = "app/username-exists";
+    throw err;
+  }
+  const addr = realEmail || usernameAuthEmail(uname);
   // توافق رجعي: لو على هذا المتصفّح حساب Firebase قديم بلا بريد، نربط البريد
   // بالحساب نفسه بدل إنشاء حساب جديد — فيبقى uid كما هو.
   let cred;
@@ -225,16 +307,35 @@ export async function signUp(email, password, name) {
   } else {
     cred = await createUserWithEmailAndPassword(auth, addr, password);
   }
-  const displayName = (name || "").trim().slice(0, 60);
+  const displayName = uname.slice(0, 60);
   try { if (displayName) await updateProfile(cred.user, { displayName }); } catch {}
-  // تأكيد البريد إلزامي لأي صلاحية كتابة (تفرضه firestore.rules)
-  try { await sendEmailVerification(cred.user); } catch (e) { console.warn(e); }
-  await setDoc(doc(requireDb(), "users", cred.user.uid), clean({
-    email: (cred.user.email || "").toLowerCase(),
-    name: displayName || cred.user.email || "",
+  if (realEmail) {
+    try { await sendEmailVerification(cred.user); } catch (e) { console.warn(e); }
+  }
+  const d = requireDb();
+  const base = {
+    email: realEmail,
+    auth_email: addr.toLowerCase(),
+    username: uname,
+    name: displayName,
     created_at: Date.now(),
-    verified: !!cred.user.emailVerified,
-  }));
+    verified: !!(realEmail && cred.user.emailVerified),
+    approved: !realEmail ? false : !!cred.user.emailVerified,
+    no_email: !realEmail,
+  };
+  try {
+    const b = writeBatch(d);
+    b.set(doc(d, "users", cred.user.uid), clean(base));
+    b.set(doc(d, "usernames", uname), clean({
+      uid: cred.user.uid, username: uname, auth_email: addr.toLowerCase(),
+      email: realEmail || null, created_at: Date.now(),
+    }));
+    await b.commit();
+    currentUserDoc = { id: cred.user.uid, ...base };
+  } catch (e) {
+    try { await deleteUser(cred.user); } catch {}
+    throw e;
+  }
   return { user: cred.user };
 }
 
@@ -261,6 +362,7 @@ export async function resendVerification() {
 export async function refreshSession() {
   if (auth?.currentUser) { try { await auth.currentUser.reload(); } catch {} }
   currentUser = auth?.currentUser || null;
+  if (currentUser) await syncMyUserDoc(currentUser).catch(() => {});
   const s = currentUser ? { user: currentUser } : null;
   authCbs.forEach((cb) => { try { cb(s); } catch (e) { console.error(e); } });
   return s;
@@ -272,31 +374,71 @@ export async function syncMyUserDoc(u = currentUser) {
   const ref = doc(requireDb(), "users", u.uid);
   let snap = null;
   try { snap = await getDoc(ref); } catch { return; } // قبل نشر القواعد الجديدة قد تُرفض القراءة
-  const email = (u.email || "").toLowerCase();
+  const authEmail = (u.email || "").toLowerCase();
+  const noEmail = isNoEmailAuthEmail(authEmail);
+  const email = noEmail ? "" : authEmail;
+  const username = normalizeUsername(u.displayName || (noEmail ? authEmail.split("@")[0] : ""));
   if (!snap.exists()) {
+    const uname = await reserveUsernameForUser(u, username, authEmail, email).catch(() => username);
+    const data = clean({
+      email,
+      auth_email: authEmail,
+      username: usernameValid(uname) ? uname : null,
+      name: (u.displayName || email || uname || "").slice(0, 60),
+      created_at: Date.now(),
+      verified: !!(email && u.emailVerified),
+      approved: !!(email && u.emailVerified),
+      no_email: noEmail,
+    });
     try {
-      await setDoc(ref, clean({
-        email,
-        name: (u.displayName || email || "").slice(0, 60),
-        created_at: Date.now(),
-        verified: !!u.emailVerified,
-      }));
+      await setDoc(ref, data);
+      currentUserDoc = { id: u.uid, ...data };
     } catch (e) { console.warn(e); }
     return;
   }
   const cur = snap.data() || {};
   const patch = {};
-  if (!!cur.verified !== !!u.emailVerified) patch.verified = !!u.emailVerified;
+  const verified = !!(email && u.emailVerified);
+  if (!!cur.verified !== verified) patch.verified = verified;
+  if (verified && cur.approved !== true) patch.approved = true;
+  if ((cur.auth_email || "") !== authEmail) patch.auth_email = authEmail;
+  if ((cur.email || "") !== email) patch.email = email;
+  if (!!cur.no_email !== noEmail) patch.no_email = noEmail;
   const nm = (u.displayName || "").trim().slice(0, 60);
   if (nm && nm !== cur.name) patch.name = nm;
   if (Object.keys(patch).length) {
     try { await updateDoc(ref, patch); } catch (e) { console.warn(e); }
   }
+  currentUserDoc = { id: u.uid, ...cur, ...patch };
 }
 
 // هل دخل المستخدم ببريد/كلمة مرور؟ (تغيير كلمة المرور متاح لهؤلاء فقط)
 export function passwordProvider() {
   return !!auth?.currentUser?.providerData?.some((p) => p.providerId === "password");
+}
+
+export async function fetchMyUserDoc(uid = currentUser?.uid) {
+  if (!uid) return null;
+  if (currentUserDoc && currentUserDoc.id === uid) return currentUserDoc;
+  try {
+    const s = await getDoc(doc(requireDb(), "users", uid));
+    currentUserDoc = s.exists() ? { id: s.id, ...s.data() } : null;
+    return currentUserDoc;
+  } catch { return null; }
+}
+
+export async function isApprovedAccount() {
+  const u = currentUser;
+  if (!u || u.isAnonymous) return false;
+  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return true;
+  const doc = await fetchMyUserDoc(u.uid);
+  return doc?.approved === true;
+}
+
+function accountKeyOf(u = currentUser, userDoc = currentUserDoc) {
+  if (!u) return "";
+  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return u.email.toLowerCase();
+  return userDoc?.approved === true ? `uid:${u.uid}` : "";
 }
 
 // تغيير الاسم الظاهر (في الحساب وفي وثيقة users)
@@ -340,15 +482,16 @@ async function hasDoc(coll, id) {
 // مدير منصّة: المالك دائماً، أو بريده في admins (صلاحيات على كل التورنيرات)
 export async function amIPlatformAdmin() {
   const u = currentUser;
-  if (!u || !u.email) return false;
+  if (!u || !u.email || isNoEmailAuthEmail(u.email) || !u.emailVerified) return false;
   return isOwnerEmail(u.email) || hasDoc("admins", u.email.toLowerCase());
 }
 
-// عضو معتمَد: بريده في members (يُنشئ تورنيرات). فحص وثيقته فقط دون تكرار فحص المنصّة.
+// حساب فعّال: بريد مؤكّد تلقائياً أو حساب بلا بريد وافق عليه المالك.
 export async function isInMembers() {
   const u = currentUser;
-  if (!u || !u.email) return false;
-  return hasDoc("members", u.email.toLowerCase());
+  if (!u || u.isAnonymous) return false;
+  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return true;
+  return (await fetchMyUserDoc(u.uid))?.approved === true;
 }
 
 export async function fetchUsers() {
@@ -363,6 +506,9 @@ export async function fetchAdminEmails() {
 export async function fetchMemberEmails() {
   const snap = await getDocs(collection(requireDb(), "members"));
   return new Set(snap.docs.map((d) => d.id));
+}
+export async function setUserApproved(uid, on) {
+  await updateDoc(doc(requireDb(), "users", uid), { approved: !!on });
 }
 
 // المفتاح هو البريد بحروف صغيرة (كما تقارنه القواعد بـ uemail() المُصغَّر)
@@ -398,9 +544,12 @@ async function nullifyWhere(coll, field, value) {
 }
 
 export async function createTournament(p) {
-  // منشئ التورنير = مالكه (تفرضه القواعد: owner_email == uemail() المُصغَّر)
+  // منشئ التورنير = مالكه (بريد مؤكد أو uid لحساب بلا بريد وافق عليه المالك)
+  const userDoc = await fetchMyUserDoc(currentUser?.uid);
+  const ownerKey = accountKeyOf(currentUser, userDoc);
   const data = { ...p };
-  if (!data.owner_email && currentUser?.email) data.owner_email = currentUser.email;
+  data.owner_uid = currentUser?.uid || null;
+  if (!data.owner_email && ownerKey && !ownerKey.startsWith("uid:")) data.owner_email = ownerKey;
   if (data.owner_email) data.owner_email = String(data.owner_email).toLowerCase();
   const ref = await addDoc(collection(requireDb(), "tournaments"), clean(data));
   return { id: ref.id, ...data };
@@ -796,9 +945,14 @@ export function buildFixtures(tournamentId, groups, teams) {
 
 export async function seedSampleTournament() {
   const d = requireDb();
-  // القواعد تشترط owner_email == بريد المُنشئ (بحروف صغيرة)
+  const userDoc = await fetchMyUserDoc(currentUser?.uid);
+  const ownerKey = accountKeyOf(currentUser, userDoc);
   const tRef = await addDoc(collection(d, "tournaments"),
-    clean({ ...SAMPLE.tournament, owner_email: (currentUser?.email || "").toLowerCase() }));
+    clean({
+      ...SAMPLE.tournament,
+      owner_uid: currentUser?.uid || null,
+      owner_email: ownerKey && !ownerKey.startsWith("uid:") ? ownerKey : null,
+    }));
   const tid = tRef.id;
 
   const groupIdByKey = {};
@@ -880,7 +1034,9 @@ export function subscribeTournament(tid, onChange) {
 // ============================================================================
 
 function isPlatformAccount(u) {
-  return !!(u && !u.isAnonymous && u.email && u.emailVerified);
+  if (!u || u.isAnonymous) return false;
+  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return true;
+  return currentUserDoc?.id === u.uid && currentUserDoc.approved === true;
 }
 
 function accountName(u) {
@@ -892,9 +1048,12 @@ export async function requirePlatformUser() {
   if (!auth) throw new Error("Firebase not configured");
   await authReady;
   const u = auth.currentUser;
+  if (u && (!currentUserDoc || currentUserDoc.id !== u.uid)) await fetchMyUserDoc(u.uid);
   if (isPlatformAccount(u)) return u;
   const err = new Error("يجب تسجيل الدخول بحساب منصة مؤكَّد للمشاركة");
-  err.code = u && !u.isAnonymous && u.email ? "auth/email-not-verified" : "auth/login-required";
+  err.code = u && !u.isAnonymous
+    ? (u.email && !isNoEmailAuthEmail(u.email) ? "auth/email-not-verified" : "auth/approval-required")
+    : "auth/login-required";
   throw err;
 }
 
@@ -918,7 +1077,7 @@ export async function fetchCompetition(id) {
 }
 export async function createCompetition(p) {
   const data = { ...compDefaults(), ...p, created_at: Date.now() };
-  if (!data.owner_email && currentUser?.email) data.owner_email = currentUser.email.toLowerCase();
+  if (!data.owner_email && currentUser?.email && !isNoEmailAuthEmail(currentUser.email)) data.owner_email = currentUser.email.toLowerCase();
   if (data.owner_email) data.owner_email = String(data.owner_email).toLowerCase();
   const ref = await addDoc(collection(requireDb(), "pcomps"), clean(data));
   return { id: ref.id, ...data };
