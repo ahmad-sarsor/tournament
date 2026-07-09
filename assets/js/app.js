@@ -10,6 +10,7 @@ import {
   getSession, onAuthChange, signOut, amIPlatformAdmin, isOwnerEmail, syncMyUserDoc,
   fetchCompetitionsByTournament, subscribeCompetition, getCompCache,
   fetchMyContact, fetchMyPredictor, registerPredictor, updateMyPredictor, savePrediction,
+  fetchPredictors, fetchPredictionsForMatch,
   computePredictionStandings, compScoring, isPredictable, predictionPoints, currentUid,
   isNoEmailAuthEmail,
 } from "./data.js";
@@ -1270,6 +1271,74 @@ async function renderMatchDetail(id, matchId) {
   if (!match) return mount(app, backLink, emptyState("🔍", "المباراة غير موجودة"));
 
   const host = el("div");
+  // توقّعات صحيحة على هذه المباراة (تُجلب مرّة عند الانتهاء): { exists, groups:[{title, rows}] }
+  let contest = null, contestLoading = false;
+  // ما مستوى التوقّع الصحيح؟ (للعرض بجانب النقاط)
+  const tierLabel = (p, m, cfg) => {
+    if (p.home === m.home_score && p.away === m.away_score) return "🎯 " + t.scoringExact;
+    if ((m.home_score - m.away_score) === (p.home - p.away)) return "↔️ " + t.scoringDiff;
+    return "✔️ " + t.scoringOutcome;
+  };
+  async function loadContest() {
+    if (contestLoading) return;
+    contestLoading = true;
+    try {
+      const comps = (await fetchCompetitionsByTournament(id).catch(() => []))
+        .filter((c) => c.status && c.status !== "draft");
+      if (!comps.length) { contest = { exists: false, groups: [] }; render(); return; }
+      const all = await fetchPredictionsForMatch(matchId).catch(() => []);
+      const groups = [];
+      for (const comp of comps) {
+        const preds = all.filter((p) => p.competition_id === comp.id);
+        if (!preds.length) continue;
+        const predictors = await fetchPredictors(comp.id).catch(() => []);
+        const nameByUid = new Map(predictors.map((p) => [p.uid, p.name]));
+        const cfg = compScoring(comp);
+        // توقّع واحد لكل مشارك (الأحدث) — كما في احتساب الترتيب
+        const best = new Map();
+        for (const p of preds) {
+          const prev = best.get(p.uid);
+          if (!prev || (p.created_at ?? 0) >= (prev.created_at ?? 0)) best.set(p.uid, p);
+        }
+        const rows = [];
+        for (const p of best.values()) {
+          const pts = predictionPoints(p, match, cfg);
+          if (pts != null && pts > 0)   // «من حصل على نقاط» فقط
+            rows.push({ name: nameByUid.get(p.uid) || t.anonymousVisitor, home: p.home, away: p.away, pts, tier: tierLabel(p, match, cfg) });
+        }
+        rows.sort((a, b) => b.pts - a.pts || String(a.name).localeCompare(String(b.name), "ar"));
+        groups.push({ title: comps.length > 1 ? (comp.title || t.predictionComp) : null, rows });
+      }
+      contest = { exists: true, groups };
+    } catch (e) { console.error(e); contest = { exists: false, groups: [] }; }
+    finally { contestLoading = false; render(); }
+  }
+
+  // قسم «توقّعات صحيحة» — يظهر بعد انتهاء المباراة فقط
+  function correctPredsSection() {
+    if (!isCounted(match)) return null;
+    if (contest === null) { loadContest(); return el("div.mp-section", {}, [el("div.spinner", { style: "margin:10px auto" })]); }
+    if (!contest.exists) return null;                 // لا مسابقة على هذا التورنير
+    const total = contest.groups.reduce((n, g) => n + g.rows.length, 0);
+    const body = [];
+    if (!total) body.push(el("p.page-sub", { style: "padding:6px 2px", text: t.noCorrectPredictors }));
+    for (const g of contest.groups) {
+      if (!g.rows.length) continue;
+      if (g.title) body.push(el("div.pc-card-title", { style: "margin:10px 0 6px", text: g.title }));
+      body.push(el("div.card", {}, g.rows.map((r, i) => el("div.sq-row", {}, [
+        el("span.player-num" + (i === 0 ? "" : ""), { text: "+" + r.pts }),
+        el("span.sq-name", { style: "flex:1", text: r.name }),
+        el("span", { style: "color:var(--text-3);font-size:.82rem;direction:ltr", text: `${r.home}:${r.away}` }),
+        el("span.badge.badge-active", { style: "font-size:.68rem", text: r.tier }),
+      ]))));
+    }
+    return el("div.mp-section", {}, [
+      el("h3.mp-title", {}, [el("span", { text: "🎯 " }), t.correctPredictorsTitle,
+        total ? el("span.page-sub", { style: "margin-inline-start:8px", text: `(${total})` }) : null]),
+      ...body,
+    ]);
+  }
+
   // زر «إدارة المباراة» يظهر فقط لمن يملك صلاحية على هذا التورنير (لا للزائر العادي)
   const canManage = await canManageTournament(tournament);
   mount(app, el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px" }, [
@@ -1333,6 +1402,7 @@ async function renderMatchDetail(id, matchId) {
         events.length ? el("div.card.card-pad", {}, [eventsTimeline(events, playersById, teamById, { homeId: match.home_team_id, awayId: match.away_team_id })])
                       : el("p.page-sub", { style: "padding:6px 2px", text: t.noEvents }),
       ]),
+      correctPredsSection(),
     );
   };
   render();
@@ -1341,7 +1411,11 @@ async function renderMatchDetail(id, matchId) {
     try {
       bundle = await fetchTournamentBundle(id);
       const m2 = bundle.matches.find((m) => m.id === matchId);
-      if (m2) match = m2;
+      if (m2) {
+        // إن تغيّرت النتيجة/الحالة نُعيد حساب «التوقّعات الصحيحة»
+        if (m2.home_score !== match.home_score || m2.away_score !== match.away_score || m2.status !== match.status) contest = null;
+        match = m2;
+      }
       render();
     } catch (e) { console.error(e); }
   }, 400));

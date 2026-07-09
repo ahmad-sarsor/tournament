@@ -553,6 +553,9 @@ export const t = {
   ptsSuffix: "نقطة",
   prizesTitle: "الجوائز",
   prizeForRank: "المركز",
+  // التوقّعات الصحيحة لكل مباراة (صفحة المباراة)
+  correctPredictorsTitle: "من توقّع بشكل صحيح",
+  noCorrectPredictors: "لم يُصب أحد نقاطاً في هذه المباراة.",
 
   // إدارة المسابقة (المنظّم)
   predictionsAdmin: "مسابقة التوقّعات",

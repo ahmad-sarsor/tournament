@@ -1288,6 +1288,12 @@ export async function fetchMyPredictions(compId, uid) {
     where("competition_id", "==", compId), where("uid", "==", uid)));
   return mapDocs(snap);
 }
+// كل توقّعات مباراة واحدة (عبر كل المسابقات) — استعلام بحقل واحد (بلا فهرس مركّب)
+export async function fetchPredictionsForMatch(matchId) {
+  if (!matchId) return [];
+  const snap = await getDocs(query(collection(requireDb(), "predictions"), where("match_id", "==", matchId)));
+  return mapDocs(snap);
+}
 
 // حفظ توقّع لمباراة واحدة (معرّف ثابت يمنع التكرار). القواعد تمنع الحفظ بعد بدء المباراة.
 export async function savePrediction(comp, match, home, away) {
