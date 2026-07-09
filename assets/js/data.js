@@ -1339,7 +1339,16 @@ export function computePredictionStandings(predictors, predictions, matches, com
   const matchById = new Map(matches.map((m) => [m.id, m]));
   const rows = new Map();
   for (const p of predictors) rows.set(p.uid, { predictor: p, points: Math.trunc(p.points_adj || 0), exact: 0, hits: 0, scored: 0, predicted: 0 });
+  // إزالة التكرار: توقّع واحد فقط لكل (مشارك، مباراة) = الأحدث (created_at) —
+  // يمنع احتساب وثيقة توقّع قديمة بمعرّف مختلف مرّتين فتُضخّم النقاط (مثلاً 5+2=7 بدل 5).
+  const best = new Map();
   for (const pred of predictions) {
+    if (pred.uid == null || pred.match_id == null) continue;
+    const key = pred.uid + "|" + pred.match_id;
+    const prev = best.get(key);
+    if (!prev || (pred.created_at ?? 0) >= (prev.created_at ?? 0)) best.set(key, pred);
+  }
+  for (const pred of best.values()) {
     const row = rows.get(pred.uid);
     if (!row) continue;                                   // توقّع بلا تسجيل — نتجاهله
     const m = matchById.get(pred.match_id);

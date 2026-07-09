@@ -106,16 +106,20 @@ function cleanup() {
 }
 
 // ---- إعلان المسابقة (مرة واحدة) + الدائرة العائمة (FAB) ----------------------
-let fabEl = null;                    // الدائرة العائمة الحالية (واحدة في كل لحظة)
+let fabEl = null, fabZone = null;    // الدائرة ومنطقة الحذف
 let autoJoinCompId = null;           // فتح نموذج التسجيل تلقائياً بعد الانتقال للتبويب
 const FAB_OFF_KEY = "tp_fab_off";    // إخفاء الدائرة لهذه الزيارة فقط (تعود بالزيارة التالية)
-const FAB_POS_KEY = "tp_fab_pos";    // موضعها بعد السحب (خلال الزيارة نفسها)
+const FAB_POS_KEY = "tp_fab_pos";    // { side, top } — الجانب والارتفاع خلال الجلسة
 const promoSeenKey = (compId) => "tp_promo_seen_" + compId;
 const openCompOf = (state) => (state.comps || []).find((c) => c.status === "open");
 
-function removeContestFab() { if (fabEl) { fabEl.remove(); fabEl = null; } }
+function removeContestFab() {
+  if (fabEl) { fabEl.remove(); fabEl = null; }
+  if (fabZone) { fabZone.remove(); fabZone = null; }
+}
 
-// الدائرة العائمة: ثابتة أسفل اليمين مهما تحرّك المستخدم، قابلة للسحب، ولها زر إخفاء
+// الدائرة العائمة بأسلوب 365: تلتصق دائماً بأحد الجانبين (لا تبقى في الوسط)،
+// وتُسحب إلى «✕» أسفل الوسط لحذفها كجرّ. الإخفاء لهذه الزيارة فقط (تعود بالتالية).
 function ensureContestFab(state) {
   removeContestFab();
   const comp = openCompOf(state);
@@ -123,55 +127,98 @@ function ensureContestFab(state) {
   try { off = sessionStorage.getItem(FAB_OFF_KEY) === "1"; } catch {}
   if (!comp || state.tab === "predictions" || off) return;
 
-  const closeBtn = el("button.fab-close", { type: "button", "aria-label": t.fabHide, title: t.fabHide, text: "✕" });
+  const FAB = 64, MARG = 16;
   fabEl = el("button.contest-fab", {
     type: "button", title: comp.title || t.predictionComp, "aria-label": t.predictionComp,
   }, [
     el("span.fab-ico", { "aria-hidden": "true", text: "🎯" }),
     el("span.fab-badge", { text: t.fabPrizes }),
-    closeBtn,
   ]);
-  // زر الإخفاء: لا يبدأ سحباً ولا يفتح المسابقة
-  closeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
-  closeBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    try { sessionStorage.setItem(FAB_OFF_KEY, "1"); } catch {}
-    removeContestFab();
-  });
 
-  // سحب لإزاحة الدائرة (تمييز السحب عن النقر بعتبة 8px)
-  let sx = 0, sy = 0, dragging = false;
   const clamp = (v, mn, mx) => Math.min(mx, Math.max(mn, v));
-  const place = (left, top) => {
-    left = clamp(left, 8, innerWidth - 72);
-    top = clamp(top, 8, innerHeight - 72);
-    fabEl.style.left = left + "px"; fabEl.style.top = top + "px";
-    fabEl.style.right = "auto"; fabEl.style.bottom = "auto";
-    try { sessionStorage.setItem(FAB_POS_KEY, JSON.stringify({ left, top })); } catch {}
+  const topRange = () => [MARG, Math.max(MARG, innerHeight - FAB - MARG)];
+
+  // على جانب (يسار/يمين) وارتفاع محدَّد — يُحفظ للجلسة
+  const placeSide = (side, top, animate) => {
+    const [mn, mx] = topRange();
+    top = clamp(top, mn, mx);
+    fabEl.classList.toggle("snapping", !!animate);
+    fabEl.style.bottom = "auto"; fabEl.style.top = top + "px";
+    if (side === "left") { fabEl.style.left = MARG + "px"; fabEl.style.right = "auto"; }
+    else { fabEl.style.right = MARG + "px"; fabEl.style.left = "auto"; }
+    try { sessionStorage.setItem(FAB_POS_KEY, JSON.stringify({ side, top })); } catch {}
   };
+  // أثناء السحب: إحداثيات حرّة تتبع الإصبع
+  const placeFree = (left, top) => {
+    fabEl.classList.remove("snapping");
+    fabEl.style.bottom = "auto"; fabEl.style.right = "auto";
+    fabEl.style.left = clamp(left, 2, innerWidth - FAB - 2) + "px";
+    fabEl.style.top = clamp(top, 2, innerHeight - FAB - 2) + "px";
+  };
+  const showZone = (show) => {
+    if (show && !fabZone) {
+      fabZone = el("div.fab-delete-zone", { "aria-hidden": "true" }, [el("span", { text: "✕" })]);
+      document.body.appendChild(fabZone);
+      requestAnimationFrame(() => fabZone && fabZone.classList.add("in"));
+    } else if (!show && fabZone) { fabZone.remove(); fabZone = null; }
+  };
+  // هل مركز الدائرة فوق منطقة الحذف؟ (نقيس من مستطيلها الفعلي)
+  const overZone = (cx, cy) => {
+    if (!fabZone) return false;
+    const z = fabZone.getBoundingClientRect();
+    return Math.hypot(cx - (z.left + z.width / 2), cy - (z.top + z.height / 2)) < 70;
+  };
+
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, hot = false;
   fabEl.addEventListener("pointerdown", (e) => {
-    sx = e.clientX; sy = e.clientY; dragging = false;
+    sx = e.clientX; sy = e.clientY;
+    const r = fabEl.getBoundingClientRect();
+    ox = e.clientX - r.left; oy = e.clientY - r.top;   // فرق الإمساك داخل الدائرة
+    dragging = false; hot = false;
     try { fabEl.setPointerCapture(e.pointerId); } catch {}
   });
   fabEl.addEventListener("pointermove", (e) => {
     if (!fabEl.hasPointerCapture || !fabEl.hasPointerCapture(e.pointerId)) return;
-    if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) < 8) return;
-    dragging = true;
-    place(e.clientX - 32, e.clientY - 32);
+    if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) < 8) return;   // عتبة تمييز السحب
+    if (!dragging) { dragging = true; fabEl.classList.add("dragging"); showZone(true); }
+    placeFree(e.clientX - ox, e.clientY - oy);
+    const cx = e.clientX - ox + FAB / 2, cy = e.clientY - oy + FAB / 2;
+    hot = overZone(cx, cy);
+    if (fabZone) fabZone.classList.toggle("hot", hot);
+    fabEl.classList.toggle("over-delete", hot);
   });
-  fabEl.addEventListener("pointerup", (e) => {
+  const endDrag = (e) => {
     try { fabEl.releasePointerCapture(e.pointerId); } catch {}
-    if (dragging) return;
-    // نقرة: مسجَّل → إلى توقّعاته · غير مسجَّل → نموذج التسجيل يُفتح تلقائياً
-    autoJoinCompId = comp.id;
-    location.hash = `#/t/${state.tournament.id}/predictions`;
-  });
+    if (!dragging) {
+      // نقرة (بلا سحب): مسجَّل → توقّعاته · غير مسجَّل → نموذج التسجيل تلقائياً
+      autoJoinCompId = comp.id;
+      location.hash = `#/t/${state.tournament.id}/predictions`;
+      return;
+    }
+    fabEl.classList.remove("dragging", "over-delete");
+    if (hot) {                                          // أُفلتت فوق «✕» → حذف كجرّ
+      showZone(false);
+      try { sessionStorage.setItem(FAB_OFF_KEY, "1"); } catch {}
+      fabEl.classList.add("popping");
+      const gone = fabEl; setTimeout(() => { if (gone === fabEl) removeContestFab(); }, 200);
+      return;
+    }
+    showZone(false);
+    // تلتصق بأقرب جانب مع الحفاظ على الارتفاع (لا تبقى في الوسط)
+    const r = fabEl.getBoundingClientRect();
+    placeSide((r.left + FAB / 2) < innerWidth / 2 ? "left" : "right", r.top, true);
+  };
+  fabEl.addEventListener("pointerup", endDrag);
+  fabEl.addEventListener("pointercancel", endDrag);
 
-  // استرجاع موضع السحب خلال الزيارة نفسها
-  try {
-    const pos = JSON.parse(sessionStorage.getItem(FAB_POS_KEY) || "null");
-    if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) place(pos.left, pos.top);
-  } catch {}
+  // موضع البداية: محفوظ للجلسة أو أسفل اليمين افتراضياً
+  let start = null;
+  try { start = JSON.parse(sessionStorage.getItem(FAB_POS_KEY) || "null"); } catch {}
+  if (start && (start.side === "left" || start.side === "right") && Number.isFinite(start.top)) {
+    placeSide(start.side, start.top, false);
+  } else {
+    placeSide("right", innerHeight - FAB - MARG - 44, false);
+  }
   document.body.appendChild(fabEl);
 }
 
@@ -347,11 +394,18 @@ async function renderTournament(id, tab) {
 
   // تحديث لحظي: أعِد جلب البيانات وأعِد رسم الصفحة (بما فيها بيانات البطولة نفسها)
   currentUnsub = subscribeTournament(id, debounce(async () => {
+    // إن غادر المستخدم صفحة هذه البطولة (لصفحة فريق/مباراة/أخرى) لا نُعِد الرسم فوقها.
+    // يعالج تسابقاً: مؤقّت مؤجَّل قد يبقى معلّقاً بعد الانتقال فيمسح الصفحة الجديدة.
+    let r = parseHash();
+    if (!(r.view === "tournament" && r.id === id)) return;
     try {
       const [tr, bundle] = await Promise.all([fetchTournament(id), fetchTournamentBundle(id)]);
       if (!tr) return;
+      r = parseHash();                                  // أعِد الفحص بعد الجلب غير المتزامن
+      if (!(r.view === "tournament" && r.id === id)) return;
       state.tournament = tr;
       state.bundle = bundle;
+      state.tab = r.tab;                                // احترم التبويب الحالي
       renderTournamentShell(state);
       toast("تم تحديث النتائج", "ok");
     } catch (e) { console.error(e); }
