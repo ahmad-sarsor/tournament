@@ -102,6 +102,112 @@ function cleanup() {
   if (currentUnsub) { currentUnsub(); currentUnsub = null; }
   if (predLockTimer) { clearTimeout(predLockTimer); predLockTimer = null; }
   cleanupComp();
+  removeContestFab();
+}
+
+// ---- إعلان المسابقة (مرة واحدة) + الدائرة العائمة (FAB) ----------------------
+let fabEl = null;                    // الدائرة العائمة الحالية (واحدة في كل لحظة)
+let autoJoinCompId = null;           // فتح نموذج التسجيل تلقائياً بعد الانتقال للتبويب
+const FAB_OFF_KEY = "tp_fab_off";    // إخفاء الدائرة لهذه الزيارة فقط (تعود بالزيارة التالية)
+const FAB_POS_KEY = "tp_fab_pos";    // موضعها بعد السحب (خلال الزيارة نفسها)
+const promoSeenKey = (compId) => "tp_promo_seen_" + compId;
+const openCompOf = (state) => (state.comps || []).find((c) => c.status === "open");
+
+function removeContestFab() { if (fabEl) { fabEl.remove(); fabEl = null; } }
+
+// الدائرة العائمة: ثابتة أسفل اليمين مهما تحرّك المستخدم، قابلة للسحب، ولها زر إخفاء
+function ensureContestFab(state) {
+  removeContestFab();
+  const comp = openCompOf(state);
+  let off = false;
+  try { off = sessionStorage.getItem(FAB_OFF_KEY) === "1"; } catch {}
+  if (!comp || state.tab === "predictions" || off) return;
+
+  const closeBtn = el("button.fab-close", { type: "button", "aria-label": t.fabHide, title: t.fabHide, text: "✕" });
+  fabEl = el("button.contest-fab", {
+    type: "button", title: comp.title || t.predictionComp, "aria-label": t.predictionComp,
+  }, [
+    el("span.fab-ico", { "aria-hidden": "true", text: "🎯" }),
+    el("span.fab-badge", { text: t.fabPrizes }),
+    closeBtn,
+  ]);
+  // زر الإخفاء: لا يبدأ سحباً ولا يفتح المسابقة
+  closeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+  closeBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    try { sessionStorage.setItem(FAB_OFF_KEY, "1"); } catch {}
+    removeContestFab();
+  });
+
+  // سحب لإزاحة الدائرة (تمييز السحب عن النقر بعتبة 8px)
+  let sx = 0, sy = 0, dragging = false;
+  const clamp = (v, mn, mx) => Math.min(mx, Math.max(mn, v));
+  const place = (left, top) => {
+    left = clamp(left, 8, innerWidth - 72);
+    top = clamp(top, 8, innerHeight - 72);
+    fabEl.style.left = left + "px"; fabEl.style.top = top + "px";
+    fabEl.style.right = "auto"; fabEl.style.bottom = "auto";
+    try { sessionStorage.setItem(FAB_POS_KEY, JSON.stringify({ left, top })); } catch {}
+  };
+  fabEl.addEventListener("pointerdown", (e) => {
+    sx = e.clientX; sy = e.clientY; dragging = false;
+    try { fabEl.setPointerCapture(e.pointerId); } catch {}
+  });
+  fabEl.addEventListener("pointermove", (e) => {
+    if (!fabEl.hasPointerCapture || !fabEl.hasPointerCapture(e.pointerId)) return;
+    if (!dragging && Math.hypot(e.clientX - sx, e.clientY - sy) < 8) return;
+    dragging = true;
+    place(e.clientX - 32, e.clientY - 32);
+  });
+  fabEl.addEventListener("pointerup", (e) => {
+    try { fabEl.releasePointerCapture(e.pointerId); } catch {}
+    if (dragging) return;
+    // نقرة: مسجَّل → إلى توقّعاته · غير مسجَّل → نموذج التسجيل يُفتح تلقائياً
+    autoJoinCompId = comp.id;
+    location.hash = `#/t/${state.tournament.id}/predictions`;
+  });
+
+  // استرجاع موضع السحب خلال الزيارة نفسها
+  try {
+    const pos = JSON.parse(sessionStorage.getItem(FAB_POS_KEY) || "null");
+    if (pos && Number.isFinite(pos.left) && Number.isFinite(pos.top)) place(pos.left, pos.top);
+  } catch {}
+  document.body.appendChild(fabEl);
+}
+
+// إعلان «مسابقة وجوائز» — يظهر مرة واحدة لكل زائر (لكل مسابقة)
+function maybeShowContestPromo(state) {
+  const comp = openCompOf(state);
+  if (!comp) return;
+  let seen = "1";
+  try { seen = localStorage.getItem(promoSeenKey(comp.id)) || ""; } catch { return; }
+  if (seen) return;
+  try { localStorage.setItem(promoSeenKey(comp.id), "1"); } catch {}
+  const prizes = (Array.isArray(comp.prizes) ? comp.prizes : []).filter(Boolean).slice(0, 3);
+  const medal = (i) => ["🥇", "🥈", "🥉"][i] || "🎁";
+  const go = () => {
+    close();
+    autoJoinCompId = comp.id;
+    location.hash = `#/t/${state.tournament.id}/predictions`;
+  };
+  const close = openModal({
+    title: "🎯 " + t.promoTitle,
+    body: el("div.promo-hero", {}, [
+      el("div.promo-ico", { "aria-hidden": "true", text: "🏆" }),
+      el("div", { style: "font-weight:800;font-size:1.15rem;margin:6px 0 2px", text: comp.title || t.predictionComp }),
+      el("p", { style: "margin:0 0 12px;color:var(--text-2)", text: comp.description || t.promoBody }),
+      prizes.length ? el("div.card.card-pad", { style: "text-align:start;margin-bottom:12px" },
+        prizes.map((p, i) => el("div.pc-prize-row", {}, [
+          el("span.pc-prize-rank", { text: medal(i) }),
+          el("span.pc-prize-txt", { text: String(p) }),
+        ]))) : null,
+      el("button.btn.btn-primary.btn-block", { type: "button", text: "🎯 " + t.promoJoin, onclick: go }),
+      el("button.btn.btn-block", {
+        type: "button", style: "background:transparent;border:0;color:var(--text-2);margin-top:6px",
+        text: t.promoLater, onclick: () => close(),
+      }),
+    ]),
+  });
 }
 
 // تمرير تلقائي لبرنامج المباريات عند فتح التبويب فقط (لا مع التحديث اللحظي)
@@ -237,6 +343,7 @@ async function renderTournament(id, tab) {
   state.comps = await fetchCompetitionsByTournament(id).catch(() => []);  // مسابقات التوقّعات
   scheduleAnchorPending = true;         // فتح جديد للصفحة ← اسمح بالتمرير التلقائي في البرنامج
   renderTournamentShell(state);
+  maybeShowContestPromo(state);         // إعلان «مسابقة وجوائز» — مرة واحدة لكل زائر
 
   // تحديث لحظي: أعِد جلب البيانات وأعِد رسم الصفحة (بما فيها بيانات البطولة نفسها)
   currentUnsub = subscribeTournament(id, debounce(async () => {
@@ -291,6 +398,7 @@ function renderTournamentShell(state) {
   );
   document.title = tournament.name + " · " + (SITE_NAME || "");
   renderTabContent(state);
+  ensureContestFab(state);   // الدائرة العائمة تتبع التبويب الحالي (تختفي داخل التوقّعات)
 }
 
 // لافتة دعوة بارزة بلون المسابقة المميّز
@@ -557,6 +665,12 @@ function renderCompView(root, state, comp, comps, live, rerender) {
   const myPredictions = uid ? live.predictions.filter((p) => p.uid === uid) : [];
   const registered = !!myPredictor;
   const pendingApproval = registered && myPredictor.verified === false;   // بانتظار اعتماد الإدارة
+  // قادم من الدائرة العائمة/الإعلان: مسجَّل → توقّعاته مباشرةً · غير مسجَّل → نموذج التسجيل
+  if (autoJoinCompId && comp.id === autoJoinCompId) {
+    autoJoinCompId = null;
+    if (registered) state.predSubTab = "mine";
+    else if (comp.status === "open") setTimeout(() => openRegisterModal(comp, state, false, rerender), 80);
+  }
   const acceptsEntries = comp.status === "open" || comp.status === "closed";
   const predsOpen = comp.predictions_open !== false;   // مرحلة «تسجيل فقط»: التوقّعات مغلقة حتى يفتحها المنظّم
   const standings = computePredictionStandings(live.predictors, live.predictions, state.bundle.matches, comp);

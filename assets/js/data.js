@@ -1254,6 +1254,19 @@ export async function fetchPredictors(compId) {
   const snap = await getDocs(query(collection(requireDb(), "predictors"), where("competition_id", "==", compId)));
   return mapDocs(snap);
 }
+
+// تصفير نقاط المسابقة: حذف كل توقّعاتها + إرجاع «تسوية النقاط» صفراً.
+// المشاركون يبقون مسجّلين — لبدء جولة جديدة من الصفر. يعيد عدد المشاركين.
+export async function resetCompetitionPoints(comp) {
+  const d = requireDb();
+  await deleteWhere("predictions", "competition_id", comp.id);
+  const preds = await fetchPredictors(comp.id);
+  await batchOp(
+    preds.filter((p) => (p.points_adj || 0) !== 0).map((p) => doc(d, "predictors", p.id)),
+    (b, ref) => b.update(ref, { points_adj: 0 })
+  );
+  return preds.length;
+}
 // قائمة التواصل الكاملة — للمنظّم فقط (تفشل للمستخدم العادي بحكم القواعد).
 // فلتر tournament_id إلزامي: قواعد القوائم في Firestore تُثبَت من شكل الاستعلام،
 // وقاعدة القراءة تعتمد على tournament_id — بدونه يُرفض الاستعلام حتى للمالك.

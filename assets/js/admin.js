@@ -801,6 +801,7 @@ async function renderPredictionsAdmin(host, state) {
             })
           : null,
         el("button.btn.btn-sm", { text: "👥 " + t.viewParticipants, onclick: () => participantsModal(c, tournament) }),
+        el("button.btn.btn-sm.btn-danger", { text: "♻️ " + t.resetPoints, onclick: () => resetPoints(c) }),
         el("button.btn.btn-sm", { text: "🖼 " + t.exportImage, onclick: () => exportBoardImageFor(c, tournament) }),
         el("button.btn.btn-sm", { text: "↗ " + t.shareComp, onclick: () => shareCompetition(c, tournament) }),
         el("a.btn.btn-sm", { href: `./index.html#/t/${tournament.id}/predictions`, target: "_blank", text: "🏅 " + t.openBoard }),
@@ -959,6 +960,18 @@ async function togglePredictions(c) {
   try {
     await api.updateCompetition(c.id, { predictions_open: open });
     toast(open ? t.predictionsStarted : t.predictionsStopped, "ok");
+    route();
+  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// تصفير نقاط المسابقة: حذف كل التوقّعات + إرجاع تسويات النقاط صفراً (تأكيد مزدوج — لا رجوع)
+async function resetPoints(c) {
+  if (!(await confirmDialog(t.resetPointsQ))) return;
+  if (!(await confirmDialog(t.resetPointsQ2))) return;
+  toast(t.loading, "");
+  try {
+    const n = await api.resetCompetitionPoints(c);
+    toast(t.resetPointsDone.replace("{n}", String(n)), "ok");
     route();
   } catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
