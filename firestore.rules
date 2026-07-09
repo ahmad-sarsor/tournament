@@ -301,15 +301,14 @@ service cloud.firestore {
     //  الحسابات من نفس المتصفّح — علامة للمالك، لا حظر آليّ.
     function userKeys() {
       return ['email', 'auth_email', 'username', 'name', 'phone', 'device_id',
-              'created_at', 'verified', 'approved', 'no_email', 'banned'];
+              'created_at', 'verified', 'approved', 'no_email', 'banned', 'removed'];
     }
     function userValuesOk(d) {
       return d.get('email', '') is string && d.get('email', '').size() <= 254
         && d.get('auth_email', '') is string && d.get('auth_email', '').size() <= 254
+        // اسم المستخدم: يبدأ بحرف إنجليزي ثم حروف/أرقام/-/_ (3–24)
         && (!('username' in d) || (d.username is string
-          && d.username.matches('^[a-z]+(-[a-z]+)*$')
-          && d.username.size() >= 3
-          && d.username.size() <= 24))
+          && d.username.matches('^[a-z][a-z0-9_-]{2,23}$')))
         && okStr(d.get('name', ''), 60)
         && (!('phone' in d) || d.phone == null || (d.phone is string && d.phone.size() <= 40))
         && (!('device_id' in d) || d.device_id == null || (d.device_id is string && d.device_id.size() <= 80))
@@ -317,6 +316,7 @@ service cloud.firestore {
         && d.get('approved', false) is bool
         && d.get('no_email', false) is bool
         && d.get('banned', false) is bool
+        && d.get('removed', false) is bool
         && okOptNum(d, 'created_at');
     }
     match /users/{userId} {
@@ -336,9 +336,10 @@ service cloud.firestore {
           && request.resource.data.auth_email == request.auth.token.email.lower()
         )
         || (isOwner()
-          && changedKeys().hasOnly(['approved', 'banned'])
+          && changedKeys().hasOnly(['approved', 'banned', 'removed'])
           && request.resource.data.get('approved', false) is bool
-          && request.resource.data.get('banned', false) is bool);
+          && request.resource.data.get('banned', false) is bool
+          && request.resource.data.get('removed', false) is bool);
       allow delete: if isOwner();
     }
 
@@ -348,7 +349,7 @@ service cloud.firestore {
         return request.resource.data.keys().hasOnly(['uid', 'username', 'auth_email', 'email', 'created_at'])
           && request.resource.data.uid is string
           && request.resource.data.username == username
-          && username.matches('^[a-z]+(-[a-z]+)*$')
+          && username.matches('^[a-z][a-z0-9_-]{2,23}$')
           && username.size() >= 3
           && username.size() <= 24
           && request.resource.data.auth_email is string

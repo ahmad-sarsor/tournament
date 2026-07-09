@@ -407,6 +407,12 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .admin-list-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); margin-bottom: 8px; box-shadow: var(--shadow-xs); }
 .admin-list-item .grow { flex: 1; min-width: 0; }
 .admin-list-item .grow .sub { color: var(--text-3); font-size: .8rem; }
+/* صفّ إدارة المستخدمين: الشارة + الأزرار تُجمَّع وتلتفّ بأناقة (لا تزدحم على الهاتف) */
+.admin-list-item.user-row { flex-wrap: wrap; }
+.user-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; justify-content: flex-end; }
+@media (max-width: 560px) {
+  .admin-list-item.user-row .user-actions { flex-basis: 100%; justify-content: flex-start; margin-top: 4px; }
+}
 .admin-list-item .player-num { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: .8rem; }
 
 /* ===== الخطّ الزمني للأحداث =============================================== */

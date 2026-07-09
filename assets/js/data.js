@@ -217,7 +217,8 @@ export async function getSession() {
 }
 
 const NO_EMAIL_DOMAIN = "no-email.tournament.local";
-const usernameRe = /^[a-z]+(?:-[a-z]+)*$/;
+// اسم المستخدم: يبدأ بحرف إنجليزي، ثم حروف صغيرة/أرقام/-/_ (3–24 محرفاً)
+const usernameRe = /^[a-z][a-z0-9_-]{2,23}$/;
 
 function normalizeUsername(username) {
   return String(username || "").trim().toLowerCase();
@@ -237,10 +238,11 @@ function usernameAuthEmail(username) {
 }
 
 function usernameBaseFrom(...parts) {
-  const raw = parts.filter(Boolean).join("-").toLowerCase()
-    .replace(/[^a-z]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-");
+  let raw = parts.filter(Boolean).join("-").toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").replace(/-+/g, "-");
+  if (!/^[a-z]/.test(raw)) raw = "u" + raw;   // يبدأ بحرف
   const base = raw || "user";
-  return base.slice(0, 18).replace(/^-+|-+$/g, "") || "user";
+  return base.slice(0, 18).replace(/[-_]+$/g, "") || "user";
 }
 
 function usernameBaseCandidates(u, preferred, realEmail) {
@@ -254,17 +256,21 @@ function usernameBaseCandidates(u, preferred, realEmail) {
 
 async function reserveUsernameForUser(u, preferred, authEmail, realEmail) {
   const bases = usernameBaseCandidates(u, preferred, realEmail);
-  for (const base of bases) {
-    const candidate = base.slice(0, 24).replace(/-+$/g, "");
-    if (!usernameValid(candidate)) continue;
-    const ref = doc(requireDb(), "usernames", candidate);
-    const existing = await getDoc(ref).catch(() => null);
-    if (!existing?.exists() || existing.data()?.uid === u.uid) {
-      await setDoc(ref, clean({
-        uid: u.uid, username: candidate, auth_email: authEmail,
-        email: realEmail || null, created_at: Date.now(),
-      }));
-      return candidate;
+  for (const base0 of bases) {
+    const base = base0.slice(0, 24).replace(/[-_]+$/g, "");
+    // نجرّب الأساس ثم بلاحقة رقمية عند التعارض (ممكنة الآن لأن الأرقام مسموحة)
+    for (let n = 0; n <= 30; n++) {
+      const candidate = (n === 0 ? base : base.slice(0, 22) + n).slice(0, 24);
+      if (!usernameValid(candidate)) continue;
+      const ref = doc(requireDb(), "usernames", candidate);
+      const existing = await getDoc(ref).catch(() => null);
+      if (!existing?.exists() || existing.data()?.uid === u.uid) {
+        await setDoc(ref, clean({
+          uid: u.uid, username: candidate, auth_email: authEmail,
+          email: realEmail || null, created_at: Date.now(),
+        }));
+        return candidate;
+      }
     }
   }
   const err = new Error("username exists");
@@ -301,6 +307,10 @@ export function deviceId() {
 // حظر/فكّ حظر مستخدم — للمالك فقط (تفرضه القواعد). المحظور لا يشارك في المسابقات.
 export async function setUserBanned(uid, on) {
   await updateDoc(doc(requireDb(), "users", uid), { banned: !!on });
+}
+// استعادة مستخدم مُزال: فكّ الحظر وإلغاء «مُزال» معاً
+export async function restoreUser(uid) {
+  await updateDoc(doc(requireDb(), "users", uid), { banned: false, removed: false });
 }
 
 // تسجيل جديد: اسم مستخدم + كلمة مرور (+هاتف اختياري) — الحساب فعّال فوراً
@@ -343,8 +353,8 @@ export async function signUp(email, password, username, personName, phone) {
     device_id: deviceId() || undefined,
     created_at: Date.now(),
     verified: !!(realEmail && cred.user.emailVerified),
-    approved: true,                 // فعّال فوراً — لا انتظار موافقة المالك
     no_email: !realEmail,
+    banned: false,                  // فعّال فوراً — الحظر بيد المالك فقط
   });
   try {
     const b = writeBatch(d);
@@ -410,8 +420,8 @@ export async function syncMyUserDoc(u = currentUser) {
       name: (u.displayName || email || uname || "").slice(0, 60),
       created_at: Date.now(),
       verified: !!(email && u.emailVerified),
-      approved: !!(email && u.emailVerified),
       no_email: noEmail,
+      banned: false,
     });
     try {
       await setDoc(ref, data);
@@ -423,7 +433,6 @@ export async function syncMyUserDoc(u = currentUser) {
   const patch = {};
   const verified = !!(email && u.emailVerified);
   if (!!cur.verified !== verified) patch.verified = verified;
-  if (verified && cur.approved !== true) patch.approved = true;
   if ((cur.auth_email || "") !== authEmail) patch.auth_email = authEmail;
   if ((cur.email || "") !== email) patch.email = email;
   if (!!cur.no_email !== noEmail) patch.no_email = noEmail;
@@ -450,18 +459,10 @@ export async function fetchMyUserDoc(uid = currentUser?.uid) {
   } catch { return null; }
 }
 
-export async function isApprovedAccount() {
-  const u = currentUser;
-  if (!u || u.isAnonymous) return false;
-  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return true;
-  const doc = await fetchMyUserDoc(u.uid);
-  return doc?.approved === true;
-}
-
-function accountKeyOf(u = currentUser, userDoc = currentUserDoc) {
+// مفتاح البريد لمالك التورنير: بريد مؤكّد فقط؛ حساب اسم المستخدم يعتمد owner_uid
+function accountKeyOf(u = currentUser) {
   if (!u) return "";
-  if (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) return u.email.toLowerCase();
-  return userDoc?.approved === true ? `uid:${u.uid}` : "";
+  return (u.email && !isNoEmailAuthEmail(u.email) && u.emailVerified) ? u.email.toLowerCase() : "";
 }
 
 // تغيير الاسم الظاهر (في الحساب وفي وثيقة users)
@@ -538,23 +539,33 @@ export async function fetchMemberEmails() {
   const snap = await getDocs(collection(requireDb(), "members"));
   return new Set(snap.docs.map((d) => d.id));
 }
-export async function setUserApproved(uid, on) {
-  await updateDoc(doc(requireDb(), "users", uid), { approved: !!on });
+// هل اسم المستخدم مسجَّل فعلاً؟ (قراءة عامّة — للتحقّق قبل تعيينه في طاقم بطولة)
+export async function usernameExists(username) {
+  const uname = normalizeUsername(username);
+  if (!usernameValid(uname)) return false;
+  try { return (await getDoc(doc(requireDb(), "usernames", uname))).exists(); }
+  catch { return false; }
 }
+
+// «حذف» مستخدم = حظر دائم لا يُعاد تفعيله (لا يمكن حذف حساب Firebase من المتصفّح،
+// فلو حذفنا سجلّه لأعاد النظام إنشاءه نظيفاً عند أول دخول). نضع banned+removed
+// (يبقى عبر إعادة الدخول)، ونحرّر اسمه ونلغي صلاحياته ونزيل آثاره من المسابقات.
 export async function deletePlatformUser(user) {
   const d = requireDb();
   const uid = String(user?.id || "").trim();
   if (!uid) throw new Error("Missing user id");
   const email = String(user?.email || "").trim().toLowerCase();
   const username = normalizeUsername(user?.username);
+  await updateDoc(doc(d, "users", uid), { banned: true, removed: true });
   const b = writeBatch(d);
-  b.delete(doc(d, "users", uid));
   if (usernameValid(username)) b.delete(doc(d, "usernames", username));
-  if (email && !isNoEmailAuthEmail(email)) {
-    b.delete(doc(d, "admins", email));
-    b.delete(doc(d, "members", email));
-  }
+  if (email && !isNoEmailAuthEmail(email)) { b.delete(doc(d, "admins", email)); b.delete(doc(d, "members", email)); }
+  if (usernameValid(username)) { b.delete(doc(d, "admins", username)); b.delete(doc(d, "members", username)); }
   await b.commit();
+  // إزالة آثاره من المسابقات كي لا يظهر في جداول الترتيب
+  for (const coll of ["predictions", "predictorContacts", "predictors"]) {
+    try { await deleteWhere(coll, "uid", uid); } catch (e) { console.warn(e); }
+  }
 }
 
 // المفتاح هو البريد بحروف صغيرة (كما تقارنه القواعد بـ uemail() المُصغَّر)

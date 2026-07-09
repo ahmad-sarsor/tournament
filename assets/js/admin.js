@@ -264,7 +264,8 @@ function renderLogin() {
       onclick: async () => {
         const addr = email.value.trim();
         errBox.hidden = true;
-        if (!addr || !addr.includes("@")) return showErr(t.enterEmailFirst);
+        // الاستعادة الذاتيّة للحسابات ذات البريد فقط (حسابات اسم المستخدم بلا بريد)
+        if (!addr || !addr.includes("@")) return showErr(t.forgotEmailOnly);
         try { await api.sendReset(addr); toast(t.resetSent, "ok"); }
         catch (err) {
           if (err?.code === "auth/invalid-email") return showErr(t.authErrors["auth/invalid-email"]);
@@ -342,8 +343,8 @@ function renderLogin() {
 
     mount(host,
       el("div.page-head", { style: "text-align:center" }, [
-        el("h1.page-title", { text: t.adminPanel }),
-        el("p.page-sub", { text: isSignup ? "" : t.loginPrompt }),
+        el("h1.page-title", { text: t.accountPortalTitle }),
+        el("p.page-sub", { text: isSignup ? t.accountPortalSubSignup : t.accountPortalSubLogin }),
       ]),
       el("div.card.card-pad", {}, [
         tabs,
@@ -583,63 +584,74 @@ async function removeSuggestion(s) {
 
 async function renderUsersAdmin() {
   if (!isOwnerUser) return renderHome();             // حماية إضافية (القواعد تفرضها أيضاً)
-  const [users, adminSet, memberSet] = await Promise.all([
+  const [allUsers, adminSet, memberSet] = await Promise.all([
     api.fetchUsers(), api.fetchAdminEmails(), api.fetchMemberEmails(),
   ]);
-  const verifiedCount = users.filter((u) => u.verified === true || u.approved === true).length;
+  const active = allUsers.filter((u) => u.removed !== true);   // المُزالون مخفيّون افتراضياً
+  const removedList = allUsers.filter((u) => u.removed === true);
+  const bannedCount = active.filter((u) => u.banned === true).length;
+
   const head = el("div.page-head", { style: "display:flex;align-items:center;gap:12px;flex-wrap:wrap" }, [
     el("a.btn.btn-sm.btn-outline", { href: "#/", text: "→ " + t.tournaments }),
     el("h1.page-title", { style: "margin:0", text: "👥 " + t.usersAdmin }),
-    el("span.page-sub", { text: `(${users.length} · ${t.verifiedBadge}: ${verifiedCount})` }),
+    el("span.page-sub", { text: `(${active.length}${bannedCount ? " · 🚫 " + bannedCount : ""})` }),
   ]);
 
   const search = el("input.input", { type: "search", placeholder: t.searchUsersPlaceholder, style: "max-width:340px;margin-bottom:14px" });
   const list = el("div");
+  let showRemoved = false;
+  const removedToggle = removedList.length ? el("button.link-btn", {
+    type: "button", style: "margin:0 0 12px", text: `${t.showRemoved} (${removedList.length})`,
+    onclick: () => { showRemoved = !showRemoved; removedToggle.textContent = (showRemoved ? t.hideRemoved : t.showRemoved) + ` (${removedList.length})`; renderList(); },
+  }) : null;
 
-  // تعدّد الحسابات من نفس الجهاز: عدّ device_id المكرّرة (علامة ⚠️ للمالك ليقرّر التبنيد)
+  // تعدّد الحسابات من نفس الجهاز: عدّ device_id المكرّرة (علامة ⚠️ للمالك ليقرّر)
   const deviceCount = new Map();
-  for (const u of users) if (u.device_id) deviceCount.set(u.device_id, (deviceCount.get(u.device_id) || 0) + 1);
+  for (const u of active) if (u.device_id) deviceCount.set(u.device_id, (deviceCount.get(u.device_id) || 0) + 1);
 
   const renderList = () => {
+    const base = showRemoved ? allUsers : active;
     const q = search.value.trim().toLowerCase();
     const shown = q
-      ? users.filter((u) => (u.name || "").toLowerCase().includes(q) || (u.username || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q))
-      : users;
+      ? base.filter((u) => (u.name || "").toLowerCase().includes(q) || (u.username || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q))
+      : base;
     clear(list);
     if (!shown.length) { list.appendChild(emptyState("👥", q ? "لا نتائج" : t.noUsers)); return; }
     for (const u of shown) {
       const em = (u.email || "").toLowerCase();
       const owner = !!em && api.isOwnerEmail(u.email);
-      const grantKey = em || u.username || "";           // مفتاح المنح: البريد أو اسم المستخدم
+      const grantKey = em || u.username || "";
       const padmin = owner || adminSet.has(em) || (u.username && adminSet.has(u.username));
       const member = padmin || memberSet.has(em) || (u.username && memberSet.has(u.username));
       const banned = u.banned === true;
+      const removed = u.removed === true;
       const roleLabel = owner ? t.roleOwner : (padmin ? t.roleAdmin : (member ? t.roleMember : t.roleUser));
       const roleCls = owner ? "badge-finished" : ((padmin || member) ? "badge-active" : "badge-upcoming");
-      // كل مسجَّل فعّال فوراً — الشارات: محظور 🚫 أو ⚠️ حسابات متعدّدة من نفس الجهاز
       const badges = [
-        banned ? el("span.badge.badge-finished", { style: "background:var(--loss);color:#fff", text: "🚫 " + t.bannedBadge }) : null,
-        (u.device_id && deviceCount.get(u.device_id) > 1)
+        removed ? el("span.badge", { style: "background:var(--text-3);color:#fff", text: "🗑 " + t.removedBadge })
+          : (banned ? el("span.badge", { style: "background:var(--loss);color:#fff", text: "🚫 " + t.bannedBadge }) : null),
+        (!removed && u.device_id && deviceCount.get(u.device_id) > 1)
           ? el("span.badge.badge-upcoming", { title: t.sameDeviceWarnHint, text: "⚠️ " + t.sameDeviceWarn })
           : null,
       ];
 
       const actions = [];
-      if (!owner) {
-        // منح/سحب حقّ إنشاء البطولات (عضو) — بالمفتاح المتاح (بريد أو اسم مستخدم)
+      if (owner) { /* المالك: بلا إجراءات */ }
+      else if (removed) {
+        actions.push(el("button.btn.btn-sm.btn-primary", { text: "↩ " + t.restoreUser, onclick: () => restoreUser(u) }));
+      } else {
         if (grantKey) actions.push((memberSet.has(em) || memberSet.has(u.username || ""))
           ? el("button.btn.btn-sm.btn-outline", { text: t.revokeMember, onclick: () => toggleMemberKey(u, false) })
           : el("button.btn.btn-sm.btn-outline", { text: t.approveMember, onclick: () => toggleMemberKey(u, true) }));
         if (grantKey) actions.push((adminSet.has(em) || adminSet.has(u.username || ""))
           ? el("button.btn.btn-sm.btn-danger", { text: t.removeAdminRole, onclick: () => toggleAdmin(u, false) })
           : el("button.btn.btn-sm.btn-outline", { text: t.makeAdmin, onclick: () => toggleAdmin(u, true) }));
-        // التبنيد بيد المالك: يمنع المشاركة في المسابقات فوراً (تفرضه القواعد)
         actions.push(banned
           ? el("button.btn.btn-sm.btn-primary", { text: t.unbanUser, onclick: () => toggleBanned(u, false) })
           : el("button.btn.btn-sm.btn-danger", { text: "🚫 " + t.banUser, onclick: () => toggleBanned(u, true) }));
-        actions.push(el("button.btn.btn-sm.btn-danger", { text: t.delete, onclick: () => removeUser(u) }));
+        actions.push(el("button.btn.btn-sm.btn-danger", { text: "🗑 " + t.delete, onclick: () => removeUser(u) }));
       }
-      list.appendChild(el("div.admin-list-item", {}, [
+      list.appendChild(el("div.admin-list-item.user-row", {}, [
         el("div.grow", {}, [
           el("div", { style: "font-weight:700;display:flex;align-items:center;gap:8px;flex-wrap:wrap" }, [
             u.name || u.username || u.email, ...badges,
@@ -651,15 +663,14 @@ async function renderUsersAdmin() {
             u.created_at ? fmtWhen(u.created_at) : null,
           ].filter(Boolean).join(" · ") }),
         ]),
-        el("span.badge." + roleCls, { text: roleLabel }),
-        ...actions,
+        el("div.user-actions", {}, [el("span.badge." + roleCls, { text: roleLabel }), ...actions]),
       ]));
     }
   };
 
   search.addEventListener("input", renderList);
   renderList();
-  mount(app, head, search, list);
+  mount(app, head, search, ...(removedToggle ? [removedToggle] : []), list);
 }
 
 // مفتاح المنح: البريد الحقيقي إن وُجد، وإلا اسم المستخدم (القوائم تقبل كليهما)
@@ -688,11 +699,18 @@ async function toggleBanned(u, on) {
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
+// «حذف» = حظر دائم + إزالة من القوائم وتحرير الاسم (لا يُعاد تفعيله بإعادة الدخول)
 async function removeUser(u) {
   if (api.isOwnerEmail(u.email)) return;
   const label = u.name || u.username || u.email || "هذا المستخدم";
-  if (!(await confirmDialog(`حذف المستخدم «${label}» من المنصّة؟ ${t.confirmDelete}`))) return;
-  try { await api.deletePlatformUser(u); toast(t.deleted, "ok"); route(); }
+  if (!(await confirmDialog(t.deleteUserQ.replace("{name}", label)))) return;
+  try { await api.deletePlatformUser(u); toast(t.userRemovedDone, "ok"); route(); }
+  catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// استعادة مستخدم مُزال (فكّ الحظر وإلغاء «مُزال»)
+async function restoreUser(u) {
+  try { await api.restoreUser(u.id); toast(t.userRestoredDone, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
@@ -1266,6 +1284,7 @@ function tournamentStaffCard(tr) {
   // اقتراحات من المستخدمين المسجّلين — التعيين باسم المستخدم أولاً (أو بالبريد للحسابات القديمة)
   api.fetchUsers().then((users) => {
     for (const u of users) {
+      if (u.removed === true) continue;   // لا نقترح مستخدماً مُزالاً/محظوراً
       const em = (u.email || "").toLowerCase();
       const un = (u.username || "").toLowerCase();
       const info = { name: u.name || "", verified: u.verified, noEmail: u.no_email === true };
@@ -1316,14 +1335,22 @@ function tournamentStaffCard(tr) {
       } catch (e) { toast(e.message || t.errorGeneric, "err"); }
     }
 
-    const add = () => {
+    const add = async () => {
       const em = input.value.trim().toLowerCase();
       if (!em) return;
+      const isEmail = EMAIL_RE.test(em);
       // يقبل اسم مستخدم (تعيين بالاسم) أو بريداً (حسابات قديمة)
-      if (!EMAIL_RE.test(em) && !api.usernameValid(em)) return toast(t.staffIdInvalid, "err");
+      if (!isEmail && !api.usernameValid(em)) return toast(t.staffIdInvalid, "err");
       if (emails().includes(em)) return toast(t.alreadyAdmin, "err");
       // لا يكون الشخص مديراً ومسجّلاً في آنٍ واحد (الإدارة تشمل التسجيل)
       if (Array.isArray(tr[dupKey]) && tr[dupKey].includes(em)) return toast(t.alreadyAdmin, "err");
+      // اسم المستخدم يجب أن يكون مسجَّلاً فعلاً — كي لا تُمنح الصلاحية لأوّل من يسجّله لاحقاً
+      if (!isEmail) {
+        input.disabled = true;
+        const ok = await api.usernameExists(em).catch(() => false);
+        input.disabled = false;
+        if (!ok) return toast(t.staffUserNotFound, "err");
+      }
       input.value = "";
       save([...emails(), em]);
     };
