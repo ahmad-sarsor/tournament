@@ -85,10 +85,15 @@ export function openSettings({ isAdmin = false, session = null, onSignOut = null
 
   const footer = [];
   if (!isAdmin) footer.push(el("button.btn.btn-outline.btn-block", { type: "button", text: "💡 " + t.suggestBox, onclick: openSuggestionModal }));
-  // مسجَّل الدخول: عرض بريده + زر تسجيل الخروج
+  // مسجَّل الدخول: عرض هويته + زر تسجيل الخروج
   if (session && onSignOut) {
+    // (D7) حساب اسم المستخدم بلا بريد: نعرض اسمه لا البريد الاصطناعي القبيح
     const email = session.user?.email || "";
-    footer.push(el("div.set-hint", { style: "text-align:center;margin-top:6px", text: email }));
+    const synthetic = email.endsWith("@no-email.tournament.local");
+    const label = synthetic
+      ? (session.user?.displayName || "@" + email.split("@")[0])
+      : (email || session.user?.displayName || "");
+    footer.push(el("div.set-hint", { style: "text-align:center;margin-top:6px", text: label }));
     footer.push(el("button.btn.btn-outline.btn-block", {
       type: "button", text: "🚪 " + t.logout,
       onclick: async () => { try { await onSignOut(); } catch {} },

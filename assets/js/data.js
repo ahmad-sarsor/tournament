@@ -6,7 +6,7 @@ import { db, auth } from "./firebase.js";
 import { OWNER_EMAILS } from "./config.js";
 import {
   collection, doc, getDoc, getDocs, query, where,
-  addDoc, setDoc, updateDoc, deleteDoc, writeBatch, onSnapshot,
+  addDoc, setDoc, updateDoc, deleteDoc, writeBatch, onSnapshot, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 import {
   signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile,
@@ -334,7 +334,8 @@ export async function signUp(email, password, username, personName, phone) {
   // بالحساب نفسه بدل إنشاء حساب جديد — فيبقى uid كما هو.
   let cred;
   const cur = auth.currentUser;
-  if (cur && !cur.email) {
+  const linkedToExisting = !!(cur && !cur.email);   // (B11) لتمييز التراجع الآمن عند الفشل
+  if (linkedToExisting) {
     cred = await linkWithCredential(cur, EmailAuthProvider.credential(addr, password));
   } else {
     cred = await createUserWithEmailAndPassword(auth, addr, password);
@@ -366,7 +367,9 @@ export async function signUp(email, password, username, personName, phone) {
     await b.commit();
     currentUserDoc = { id: cred.user.uid, ...base };
   } catch (e) {
-    try { await deleteUser(cred.user); } catch {}
+    // (B11) نحذف الحساب فقط إن كان جديداً؛ حساب قديم رُبط به البريد لا يُحذف
+    // (حذفه كان يُيتّم مشاركاته القديمة إلى الأبد)
+    if (!linkedToExisting) { try { await deleteUser(cred.user); } catch {} }
     throw e;
   }
   return { user: cred.user };
@@ -701,8 +704,20 @@ export async function updateMatch(id, patch) {
   const p = { ...patch };
   // عند أي انتقال إلى «مباشر» نختم لحظة البدء (يغطّي زر البدء، إعادة الفتح، أول هدف، نموذج التعديل)
   if (p.status === "live" && p.live_started_at === undefined) p.live_started_at = Date.now();
-  // إن مسّ التعديل التاريخ/الوقت نعيد حساب موعد قفل التوقّع
-  if ("match_date" in p || "match_time" in p) p.locks_at = matchLockMillis(p.match_date, p.match_time);
+  // إن مسّ التعديل التاريخ/الوقت نعيد حساب موعد قفل التوقّع.
+  // (B13) باتش جزئي (أحد الحقلين فقط) كان يمسح locks_at — ندمج مع القيمة المخزّنة.
+  const touchesDate = "match_date" in p, touchesTime = "match_time" in p;
+  if (touchesDate || touchesTime) {
+    let date = p.match_date, time = p.match_time;
+    if (touchesDate !== touchesTime) {
+      try {
+        const cur = (await getDoc(doc(requireDb(), "matches", id))).data() || {};
+        if (!touchesDate) date = cur.match_date;
+        if (!touchesTime) time = cur.match_time;
+      } catch {}
+    }
+    p.locks_at = matchLockMillis(date, time);
+  }
   await updateDoc(doc(requireDb(), "matches", id), clean(p));
   // ختم لحظة الانتهاء الفعلية (للتدقيق): مرّة واحدة عند أول انتهاء فقط، فلا يُطمَس الوقت
   // الأصلي عند تعديل مباراة منتهية لاحقاً. كتابة منفصلة «أفضل جهد»: لو لم تُنشر قواعد
@@ -784,12 +799,19 @@ export async function addGoal(match, teamId, playerId, minute, teamGoalEvents = 
   const isHome = match.home_team_id === teamId;
   const home = match.home_score ?? 0, away = match.away_score ?? 0;
   const curScore = isHome ? home : away;
-  const patch = { home_score: home, away_score: away };
-  if (teamGoalEvents >= curScore) { // هدف جديد
-    if (isHome) patch.home_score = home + 1; else patch.away_score = away + 1;
+  const patch = {};
+  if (teamGoalEvents >= curScore) {
+    // هدف جديد — increment ذرّي على الخادم (B5): مسجّلان متزامنان لا يُضيعان هدفاً.
+    // نضمن أولاً أن النتيجتين رقميتان (قد تكونان null قبل أول هدف).
+    if (home === 0 && match.home_score == null) patch.home_score = 0;
+    if (away === 0 && match.away_score == null) patch.away_score = 0;
+    if (Object.keys(patch).length) await updateMatch(match.id, patch);
+    const incPatch = { [isHome ? "home_score" : "away_score"]: increment(1) };
+    if (match.status === "scheduled") incPatch.status = "live";
+    await updateMatch(match.id, incPatch);
+  } else if (match.status === "scheduled") {
+    await updateMatch(match.id, { status: "live", home_score: home, away_score: away });
   }
-  if (match.status === "scheduled") patch.status = "live";
-  await updateMatch(match.id, patch);
   return createEvent({
     tournament_id: match.tournament_id, match_id: match.id,
     team_id: teamId, player_id: playerId || null, type: "goal", minute: minute ?? null,
@@ -804,13 +826,23 @@ export async function addCard(match, teamId, playerId, minute, type) {
   });
 }
 
-// ضبط النتيجة مباشرةً (أزرار +/-)
+// ضبط النتيجة مباشرةً (أزرار +/-). الزيادة ذرّية (B5)؛ الإنقاص قراءة-كتابة
+// مع حدّ أدنى صفر (نادر التزامن، والقواعد ترفض السالب احتياطاً).
 export async function bumpScore(match, isHome, delta) {
   const home = match.home_score ?? 0, away = match.away_score ?? 0;
-  const patch = { home_score: home, away_score: away };
-  if (isHome) patch.home_score = Math.max(0, home + delta); else patch.away_score = Math.max(0, away + delta);
-  if (match.status === "scheduled" && delta > 0) patch.status = "live";
-  await updateMatch(match.id, patch);
+  const key = isHome ? "home_score" : "away_score";
+  if (delta > 0) {
+    const init = {};
+    if (match.home_score == null) init.home_score = 0;
+    if (match.away_score == null) init.away_score = 0;
+    if (Object.keys(init).length) await updateMatch(match.id, init);
+    const patch = { [key]: increment(delta) };
+    if (match.status === "scheduled") patch.status = "live";
+    await updateMatch(match.id, patch);
+  } else {
+    const cur = isHome ? home : away;
+    await updateMatch(match.id, { [key]: Math.max(0, cur + delta) });
+  }
 }
 
 // حذف حدث؛ لو كان هدفاً نُنقص النتيجة فقط إذا كانت كل الأهداف منسوبة (المسجّلون == النتيجة)
@@ -882,11 +914,18 @@ export function computeQualifiers(tournament, groups, teams, matches) {
   const points = { win: tournament.win_points ?? 3, draw: tournament.draw_points ?? 1, loss: tournament.loss_points ?? 0 };
   const perGroup = Math.max(1, tournament.qualifiers_per_group ?? 2);
 
+  // (B6) دلو ضمني للفرق «بدون بيت» — يدعم الدوري الفردي (كما في buildFixtures)
+  const buckets = groups.map((g) => teams.filter((tm) => tm.group_id === g.id));
+  const ungrouped = teams.filter((tm) => tm.group_id == null);
+  if (ungrouped.length) buckets.push(ungrouped);
+
   // متأهّلو كل بيت مرتّبين حسب المرتبة (رتبة 0 = بطل البيت، 1 = وصيف…)
+  // في الدوري الفردي (دلو واحد): نأخذ أوائل الترتيب العام بعدد يكفي شجرة من 4 على الأقل
+  const soloLeague = buckets.length === 1;
   const tiers = []; // tiers[rank] = [{ team, gi }]
-  groups.forEach((g, gi) => {
-    const gTeams = teams.filter((tm) => tm.group_id === g.id);
-    computeGroupStandings(gTeams, matches, points).slice(0, perGroup)
+  buckets.forEach((gTeams, gi) => {
+    const take = soloLeague ? Math.max(perGroup, Math.min(4, gTeams.length)) : perGroup;
+    computeGroupStandings(gTeams, matches, points).slice(0, take)
       .forEach((row, rank) => { (tiers[rank] = tiers[rank] || []).push({ team: row.team, gi }); });
   });
   const flat = tiers.reduce((n, t) => n + t.length, 0);
@@ -988,9 +1027,27 @@ export async function syncKnockoutAdvancement(bundle) {
     const next = byRP.get((m.round + 1) + "|" + Math.floor(m.bracket_pos / 2));
     if (!next) continue;
     const slot = m.bracket_pos % 2 === 0 ? "home_team_id" : "away_team_id";
-    if (next[slot] !== w) { await updateMatch(next.id, { [slot]: w }); next[slot] = w; changed++; }
+    if (next[slot] !== w) {
+      // (B10) لا نبدّل طرفاً في مباراة تالية لُعبت/جارية — كان يُلصق نتيجة قديمة بفريق جديد
+      if (next.status !== "scheduled") {
+        console.warn("knockout: تغيّر فائز جولة سابقة لكن مباراة الدور التالي لُعبت — تُركت كما هي", next.id);
+        continue;
+      }
+      await updateMatch(next.id, { [slot]: w }); next[slot] = w; changed++;
+    }
   }
   return changed;
+}
+
+// (B10) لا يجوز إنهاء مباراة إقصائية بالتعادل — لا يتأهّل أحد وتتجمّد الشجرة بصمت
+export function knockoutDrawBlocked(match, patch = {}) {
+  const stage = patch.stage ?? match?.stage;
+  if (stage !== "knockout") return false;
+  const status = patch.status ?? match?.status;
+  if (status !== "finished") return false;
+  const h = patch.home_score ?? match?.home_score;
+  const a = patch.away_score ?? match?.away_score;
+  return h != null && a != null && h === a;
 }
 
 // ---- توليد مباريات دوري كامل (طريقة الدائرة) --------------------------------
@@ -1106,7 +1163,9 @@ export function subscribeTournament(tid, onChange) {
   const onColl = (coll, snap) => {
     const rows = mapDocs(snap);
     c[coll] = (coll === "matches" ? rows.map(withLock) : rows).sort(sorters[coll]);
-    if (!c.ready) { delivered.add(coll); if (delivered.size >= 5) c.ready = true; } // أول تهيئة بلا onChange
+    // (B12) عند اكتمال التهيئة نبثّ onChange مرة — تغييرٌ وقع بين الجلب الأول
+    // والاشتراك كان يبقى محبوساً في الكاش بلا رسم حتى تغيير لاحق
+    if (!c.ready) { delivered.add(coll); if (delivered.size >= 5) { c.ready = true; emit(); } }
     else emit();
   };
   const mk = (coll) => onSnapshot(
@@ -1218,11 +1277,13 @@ export async function registerPredictor(comp, { name, phone, email, age }) {
   b.set(doc(d, "predictors", id), clean({
     ...base, name: displayName, verified: true,
   }));
+  // البريد الاصطناعي (@no-email…) ليس وسيلة تواصل حقيقية — لا يُعرض للمنظّم
+  const realEmail = user.email && !isNoEmailAuthEmail(user.email) ? user.email : (email || "");
   b.set(doc(d, "predictorContacts", id), clean({
     ...base,
     phone: phoneStr,
     phone_verified: false,
-    email: String(user.email || email || "").trim().toLowerCase().slice(0, 120),
+    email: String(realEmail).trim().toLowerCase().slice(0, 120) || null,
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
   await b.commit();
@@ -1281,11 +1342,17 @@ export async function updateMyPredictor(comp, uid, { name, phone, email, age }) 
   const id = predKey(comp.id, user.uid);
   const phoneStr = phone ? String(phone).trim().slice(0, 40) : null;
   const displayName = accountName(user) || String(name || "").trim().slice(0, 60);
+  // (B9) لا نُسقط شارة «هاتف موثّق» إلا إذا تغيّر الرقم فعلاً
+  let oldContact = null;
+  try { oldContact = (await getDoc(doc(requireDb(), "predictorContacts", id))).data() || null; } catch {}
+  const phoneUnchanged = oldContact && (oldContact.phone || null) === phoneStr;
+  // البريد الاصطناعي (@no-email…) ليس وسيلة تواصل — لا نخزّنه للمنظّم
+  const realEmail = user.email && !isNoEmailAuthEmail(user.email) ? user.email : (email || "");
   await updateDoc(doc(requireDb(), "predictors", id), { name: displayName });
   await updateDoc(doc(requireDb(), "predictorContacts", id), clean({
     phone: phoneStr,
-    phone_verified: false,
-    email: String(user.email || email || "").trim().toLowerCase().slice(0, 120),
+    phone_verified: phoneUnchanged ? (oldContact.phone_verified === true) : false,
+    email: String(realEmail).trim().toLowerCase().slice(0, 120) || null,
     age: (age == null || age === "") ? null : Math.trunc(Number(age)),
   }));
 }

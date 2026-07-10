@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 //  لوحة الإدارة: مصادقة + إدارة البطولات/البيوت/الفرق/المباريات + توليد المباريات
 // ============================================================================
 import { isConfigured } from "./firebase.js";
@@ -41,17 +41,22 @@ function canScoreTournament(tr) {
 const authMsg = (e, fallback) => (e && t.authErrors && t.authErrors[e.code]) || fallback;
 let uid = 0; // عدّاد لتوليد معرّفات فريدة لحقول النماذج (ربط label بالحقل)
 let adminUnsub = null; // اشتراك التحديث اللحظي (للوحة الإدارة المباشرة)
+let adminAnchorPending = true; // (D8) قفزة المرساة عند فتح التبويب فقط، لا بعد كل حفظ
 function cleanupAdmin() { if (adminUnsub) { adminUnsub(); adminUnsub = null; } }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 const AUTH_RETURN_KEY = "tp_auth_return";
+// (D5) المفتاح مع طابع زمني: عودة أقدم من 15 دقيقة تُتجاهل — لا يخطف دخولاً لاحقاً
 function consumeAuthReturn() {
   let raw = "";
   try { raw = localStorage.getItem(AUTH_RETURN_KEY) || ""; } catch {}
   if (!raw) return "";
   try {
-    const url = new URL(raw, location.href);
-    const here = new URL(location.href);
     localStorage.removeItem(AUTH_RETURN_KEY);
+    let target = raw, ts = 0;
+    if (raw.startsWith("{")) { const o = JSON.parse(raw); target = o.url || ""; ts = o.ts || 0; }
+    if (ts && Date.now() - ts > 15 * 60 * 1000) return "";   // انتهت صلاحيته
+    const url = new URL(target, location.href);
+    const here = new URL(location.href);
     if (url.origin !== here.origin || /\/admin\.html$/i.test(url.pathname)) return "";
     return url.href;
   } catch {
@@ -77,7 +82,8 @@ async function boot() {
     if (session) api.syncMyUserDoc().catch(() => {});   // يبقي حالة التوثيق/الاسم محدَّثة
     await refreshRole(); renderUserBox(); route(); autoFinishStale();
   });
-  window.addEventListener("hashchange", route);
+  // (D8) قفزة «يوم المرساة» عند تنقّل فعلي فقط — لا بعد كل حفظ نتيجة (route المباشر)
+  window.addEventListener("hashchange", () => { adminAnchorPending = true; route(); });
   renderUserBox();
   route();
   autoFinishStale();                                   // فحص فوري عند الفتح
@@ -124,6 +130,8 @@ async function autoFinishStale() {
     if (allowed) stale = stale.filter((m) => allowed.has(m.tournament_id));
 
     for (const m of stale) {
+      // (B10) لا نُنهي مباراة إقصائية متعادلة تلقائياً — تحتاج قرار المنظّم (ترجيح)
+      if (api.knockoutDrawBlocked(m, { status: "finished", home_score: m.home_score ?? 0, away_score: m.away_score ?? 0 })) continue;
       try {
         await api.updateMatch(m.id, {
           status: "finished",
@@ -142,14 +150,15 @@ function renderUserBox() {
   if (!session) return;
   const label = (session.user.displayName || session.user.email || "").trim();
   const shown = label.length > 22 ? label.slice(0, 21) + "…" : label;
+  // (A4) ألوان .btn الافتراضية — الأبيض المفروض سابقاً كان يختفي على الرأس الفاتح
   userBox.appendChild(el("span", { style: "display:flex;align-items:center;gap:8px" }, [
     el("button.btn.btn-sm.btn-outline", {
       title: t.myAccount,
-      style: "background:rgba(255,255,255,.15);color:#fff;border-color:transparent;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
+      style: "max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap",
       onclick: () => accountModal(),
     }, ["👤 " + shown]),
     el("button.btn.btn-sm.btn-outline", {
-      text: t.logout, style: "background:rgba(255,255,255,.15);color:#fff;border-color:transparent",
+      text: t.logout,
       onclick: async () => { await api.signOut(); location.hash = "#/"; },
     }),
   ]));
@@ -172,6 +181,13 @@ async function route() {
   cleanupAdmin();
   if (!isConfigured) return renderSetupNeeded();
   if (!session) return renderLogin();
+  // (A3) حساب بريد قديم غير مؤكَّد: شاشة التأكيد أولاً (كانت كوداً ميتاً لا يُستدعى)،
+  // ولا نستهلك مفتاح العودة قبل التأكيد — كان يرتد للمسابقة بلا تفسير في حلقة أبدية.
+  const em = session.user.email || "";
+  if (em && !api.isNoEmailAuthEmail(em) && !session.user.emailVerified) {
+    clear(userBox); renderUserBox();
+    return renderVerifyEmail();
+  }
   const authReturn = consumeAuthReturn();
   if (authReturn) { location.href = authReturn; return; }
   const r = parseHash();
@@ -597,7 +613,7 @@ async function renderUsersAdmin() {
     el("span.page-sub", { text: `(${active.length}${bannedCount ? " · 🚫 " + bannedCount : ""})` }),
   ]);
 
-  const search = el("input.input", { type: "search", placeholder: t.searchUsersPlaceholder, style: "max-width:340px;margin-bottom:14px" });
+  const search = el("input.input", { type: "search", "aria-label": t.searchUsersPlaceholder, placeholder: t.searchUsersPlaceholder, style: "max-width:340px;margin-bottom:14px" });
   const list = el("div");
   let showRemoved = false;
   const removedToggle = removedList.length ? el("button.link-btn", {
@@ -723,7 +739,7 @@ async function renderTournamentAdmin(id, tab) {
   const canEdit = canEditTournament(tournament);
   const scorerOnly = !canEdit && canScoreTournament(tournament); // مسجِّل نتائج بلا إدارة
   if (!canEdit && !scorerOnly) return mount(app,
-    el("a.header-link", { href: "#/", text: "→ " + t.backToTournaments, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+    el("a.header-link.back-link", { href: "#/", text: "→ " + t.backToTournaments }),
     emptyState("🔒", t.noPermissionTournament));
   const bundle = await api.fetchTournamentBundle(id);
   // المسجِّل يرى تبويب المباريات فقط
@@ -745,7 +761,7 @@ async function renderTournamentAdmin(id, tab) {
 
   const content = el("div");
   mount(app,
-    el("a.header-link", { href: "#/", text: "→ " + t.backToTournaments, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+    el("a.header-link.back-link", { href: "#/", text: "→ " + t.backToTournaments }),
     el("div.page-head", { style: "margin-top:10px" }, [el("h1.page-title", { text: tournament.name })]),
     banner, tabs, content);
 
@@ -807,8 +823,8 @@ async function renderPredictionsAdmin(host, state) {
           (c.status === "draft") ? el("div.pc-adm-hintline", { text: "• " + t.pcDraftHint }) : null,
         ]),
         el("div.pc-adm-icons", {}, [
-          el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => competitionForm(state, c) }),
-          el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeCompetition(c) }),
+          el("button.icon-btn", { text: "✎", title: t.edit, "aria-label": t.edit, onclick: () => competitionForm(state, c) }),
+          el("button.icon-btn", { text: "🗑", title: t.delete, "aria-label": t.delete, onclick: () => removeCompetition(c) }),
         ]),
       ]),
       el("div.pc-adm-actions", {}, [
@@ -1072,11 +1088,11 @@ async function loadParticipants(body, comp, tournament) {
           el("td", { text: c.age != null ? String(c.age) : "—" }),
           el("td", {}, [el("span.pts", { text: String(r.points) })]),
           el("td", {}, [el("div", { style: "display:flex;gap:4px" }, [
-            el("button.icon-btn", { text: "👁", title: t.viewPredictions,
+            el("button.icon-btn", { text: "👁", title: t.viewPredictions, "aria-label": t.viewPredictions,
               onclick: () => participantPredictionsModal(comp, r, predictions, bundle, reload) }),
-            el("button.icon-btn", { text: "✎", title: t.editParticipant,
+            el("button.icon-btn", { text: "✎", title: t.editParticipant, "aria-label": t.editParticipant,
               onclick: () => participantEditForm(comp, r, contactByUid.get(r.predictor.uid) || null, reload) }),
-            el("button.icon-btn", { text: "🗑", title: t.deleteParticipant, onclick: async () => {
+            el("button.icon-btn", { text: "🗑", title: t.deleteParticipant, "aria-label": t.deleteParticipant, onclick: async () => {
               if (!(await confirmDialog(`${t.deleteParticipantQ} (${r.predictor.name || "—"})`))) return;
               try { await api.deleteParticipant(comp, r.predictor.uid); toast(t.participantDeleted, "ok"); reload(); }
               catch (e) { toast(e.message || t.errorGeneric, "err"); }
@@ -1193,7 +1209,17 @@ function participantEditForm(comp, row, contact, onSaved) {
   const phoneI = el("input.input", { type: "tel", maxlength: "40", value: contact?.phone || "", style: "direction:ltr;text-align:end" });
   const emailI = el("input.input", { type: "email", maxlength: "120", value: contact?.email || "", style: "direction:ltr;text-align:end" });
   const ageI = el("input.input", { type: "number", min: "3", max: "120", inputmode: "numeric", value: contact?.age ?? "" });
-  const adjI = el("input.input", { type: "number", min: "-9999", max: "9999", inputmode: "numeric", value: String(p.points_adj ?? 0), style: "direction:ltr;text-align:end" });
+  // (E7) لوحة الأرقام على iOS بلا زر سالب — أزرار ± تضمن الخصم من أي جهاز
+  const adjI = el("input.input", { type: "number", min: "-9999", max: "9999", value: String(p.points_adj ?? 0), style: "direction:ltr;text-align:center;flex:1" });
+  const adjStep = (d) => {
+    const v = parseInt(adjI.value, 10);
+    adjI.value = String(Math.max(-9999, Math.min(9999, (Number.isFinite(v) ? v : 0) + d)));
+  };
+  const adjRow = el("div", { style: "display:flex;gap:8px;align-items:center" }, [
+    el("button.btn.btn-sm.btn-outline", { type: "button", text: "−", "aria-label": "إنقاص", onclick: () => adjStep(-1) }),
+    adjI,
+    el("button.btn.btn-sm.btn-outline", { type: "button", text: "＋", "aria-label": "زيادة", onclick: () => adjStep(1) }),
+  ]);
   const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
 
   const body = el("div", {}, [
@@ -1202,7 +1228,7 @@ function participantEditForm(comp, row, contact, onSaved) {
       contact?.phone_verified ? el("div.field-hint", { text: "✓ " + t.phoneVerifiedMark + " — " + t.phoneEditDropsBadge }) : null]),
     el("div.field", {}, [el("label", { text: t.regEmail }), emailI]),
     el("div.field", {}, [el("label", { text: t.regAge }), ageI]),
-    el("div.field", {}, [el("label", { text: t.pointsAdjLbl }), adjI,
+    el("div.field", {}, [el("label", { text: t.pointsAdjLbl }), adjRow,
       el("div.field-hint", { text: t.pointsAdjHint.replace("{pts}", String(row.points)) })]),
     err,
   ]);
@@ -1383,7 +1409,7 @@ function tournamentStaffCard(tr) {
   function section({ key, title, hint, emptyText, dupKey }) {
     const listHost = el("div");
     const input = el("input.input", {
-      type: "text", list: dlId, placeholder: t.staffIdPlaceholder,
+      type: "text", list: dlId, "aria-label": t.staffIdPlaceholder, placeholder: t.staffIdPlaceholder,
       style: "flex:1;direction:ltr;text-align:end",
     });
     const emails = () => (Array.isArray(tr[key]) ? tr[key] : []);
@@ -1534,8 +1560,8 @@ function renderTeamsAdmin(host, state) {
         ]),
       ]),
       el("button.btn.btn-sm.btn-outline", { text: "👥", title: t.players, onclick: () => playersModal(state, tm) }),
-      el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => teamForm(tournament.id, groups, tm) }),
-      el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeTeam(tm) }),
+      el("button.icon-btn", { text: "✎", title: t.edit, "aria-label": t.edit, onclick: () => teamForm(tournament.id, groups, tm) }),
+      el("button.icon-btn", { text: "🗑", title: t.delete, "aria-label": t.delete, onclick: () => removeTeam(tm) }),
     ]));
   }
   mount(host, wrap);
@@ -1561,8 +1587,8 @@ function renderGroupsAdmin(host, state) {
         el("div", { style: "font-weight:700", text: g.name }),
         el("div.sub", { text: `${count} فريق` }),
       ]),
-      el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => groupForm(tournament.id, g) }),
-      el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeGroup(g) }),
+      el("button.icon-btn", { text: "✎", title: t.edit, "aria-label": t.edit, onclick: () => groupForm(tournament.id, g) }),
+      el("button.icon-btn", { text: "🗑", title: t.delete, "aria-label": t.delete, onclick: () => removeGroup(g) }),
     ]));
   }
   mount(host, wrap);
@@ -1635,8 +1661,8 @@ function playersModal(state, team) {
         ]),
         el("button.icon-btn", { text: "▲", title: t.moveUp, disabled: idx === 0, onclick: () => movePlayer(state, team, p, -1) }),
         el("button.icon-btn", { text: "▼", title: t.moveDown, disabled: idx === members.length - 1, onclick: () => movePlayer(state, team, p, 1) }),
-        el("button.icon-btn", { text: "✎", title: t.edit, onclick: () => playerForm(state, team, p) }),
-        el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removePlayer(state, team, p) }),
+        el("button.icon-btn", { text: "✎", title: t.edit, "aria-label": t.edit, onclick: () => playerForm(state, team, p) }),
+        el("button.icon-btn", { text: "🗑", title: t.delete, "aria-label": t.delete, onclick: () => removePlayer(state, team, p) }),
       ]));
     });
   };
@@ -1751,14 +1777,16 @@ function renderMatchesTab(host, state) {
         el("a.btn.btn-sm.btn-primary", { href: `#/t/${tournament.id}/m/${m.id}`,
           text: (m.status === "finished" ? "✎ " + t.editMatchBtn : "▶ " + t.manageMatchBtn) }),
         scorerOnly ? null : el("button.icon-btn", { text: "✎", title: t.editMatchInfo, onclick: () => matchForm(state, m) }),
-        scorerOnly ? null : el("button.icon-btn", { text: "🗑", title: t.delete, onclick: () => removeMatch(m) }),
+        scorerOnly ? null : el("button.icon-btn", { text: "🗑", title: t.delete, "aria-label": t.delete, onclick: () => removeMatch(m) }),
       ]));
     }
   }
   mount(host, bar, list);
 
-  // انتقال تلقائي إلى أقرب يوم غير مُنتهٍ (نفس منطق جدول المباريات العام)
-  const anchor = pickMatchAnchorDay(matches);
+  // انتقال تلقائي إلى أقرب يوم غير مُنتهٍ — عند فتح التبويب فقط (D8):
+  // إعادة الرسم بعد حفظ نتيجة كانت تقفز بالمنظّم بعيداً عن مكان عمله
+  const anchor = adminAnchorPending ? pickMatchAnchorDay(matches) : null;
+  adminAnchorPending = false;
   if (anchor) requestAnimationFrame(() => {
     const target = list.querySelector(`.day-head[data-date="${anchor}"]`);
     if (target) target.scrollIntoView({ block: "start", behavior: "auto" });
@@ -1840,6 +1868,8 @@ function resultModal(m) {
       const as = v.away_score === "" ? null : toInt(v.away_score, null);
       let status = v.status;
       if (status === "finished" && (hs == null || as == null)) return toast("أدخل نتيجة الفريقين", "err");
+      // (B10) لا تعادل في الإقصائيات — لا يتأهّل أحد وتتجمّد الشجرة بصمت
+      if (api.knockoutDrawBlocked(m, { home_score: hs, away_score: as, status })) return toast(t.koDrawNotAllowed, "err");
       if (status === "scheduled") { /* السماح بمسح النتيجة */ }
       await api.updateMatch(m.id, { home_score: hs, away_score: as, status });
       close(); toast(t.saved, "ok"); route();
@@ -1875,12 +1905,12 @@ async function renderLiveConsole(tid, matchId) {
   if (!tournament) return mount(app, emptyState("🔍", "البطولة غير موجودة"),
     el("a.btn.btn-outline", { href: "#/", text: t.backToTournaments }));
   if (!canScoreTournament(tournament)) return mount(app,
-    el("a.header-link", { href: "#/", text: "→ " + t.backToTournaments, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+    el("a.header-link.back-link", { href: "#/", text: "→ " + t.backToTournaments }),
     emptyState("🔒", t.noPermissionTournament));
   let bundle = await api.fetchTournamentBundle(tid);
   let match = bundle.matches.find((m) => m.id === matchId);
   if (!match) return mount(app,
-    el("a.header-link", { href: `#/t/${tid}/matches`, text: "→ " + t.manageMatches, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+    el("a.header-link.back-link", { href: `#/t/${tid}/matches`, text: "→ " + t.manageMatches }),
     emptyState("🔍", "المباراة غير موجودة"));
 
   const teamById = new Map(bundle.teams.map((x) => [x.id, x]));
@@ -1977,6 +2007,8 @@ async function renderLiveConsole(tid, matchId) {
       if (status === "finished") {
         patch.home_score = match.home_score ?? 0;
         patch.away_score = match.away_score ?? 0;
+        // (B10) لا تعادل «منتهية» في الإقصائيات
+        if (api.knockoutDrawBlocked(match, patch)) return toast(t.koDrawNotAllowed, "err");
       }
       await api.updateMatch(matchId, patch);
       await reload();
@@ -2083,7 +2115,7 @@ async function renderLiveConsole(tid, matchId) {
     }
 
     mount(container,
-      el("a.header-link", { href: `#/t/${tid}/matches`, text: "→ " + t.manageMatches, style: "background:transparent;color:var(--text-2);padding:0;font-size:.85rem" }),
+      el("a.header-link.back-link", { href: `#/t/${tid}/matches`, text: "→ " + t.manageMatches }),
       el("div.lc-scoreboard" + (live ? ".is-live" : ""), {}, [
         el("div.lc-team", { text: home ? home.name : "—" }),
         el("div.lc-score", {}, [

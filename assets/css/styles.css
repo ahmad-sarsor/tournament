@@ -1,4 +1,4 @@
-/* ==========================================================================
+﻿/* ==========================================================================
    منصّة إدارة البطولات — نظام التصميم (أنيق/بسيط، أزرق احترافي)
    Minimal · professional blue · RTL Arabic · light + dark
    ========================================================================== */
@@ -39,7 +39,7 @@
   --ink:          #101b33;
   --text:         #1b2740;
   --text-2:       #5a6781;
-  --text-3:       #93a0b8;
+  --text-3:      #5f6c86;
 
   --shadow-xs:    0 1px 2px rgba(16,27,51,.05);
   --shadow-sm:    0 2px 6px rgba(16,27,51,.07);
@@ -76,7 +76,7 @@
     --pc:#9d74ff; --pc-2:#e368f5;
     --win:#2ecc71; --win-soft:#0f2b1c; --loss:#ff5a64; --loss-soft:#331418; --live:#ff5a64;
     --bg:#0a1120; --surface:#121c33; --surface-2:#182441; --surface-3:#20304f; --border:#26355a; --border-2:#354769;
-    --ink:#ecf2ff; --text:#dce5f7; --text-2:#9aa9c6; --text-3:#637293;
+    --ink:#ecf2ff; --text:#dce5f7; --text-2:#9aa9c6; --text-3:#8fa0c0;
     --shadow-xs:0 1px 2px rgba(0,0,0,.4); --shadow-sm:0 2px 6px rgba(0,0,0,.45);
     --shadow-md:0 8px 24px -8px rgba(0,0,0,.6); --shadow-lg:0 20px 44px -12px rgba(0,0,0,.7);
   }
@@ -87,7 +87,7 @@
   --pc:#9d74ff; --pc-2:#e368f5;
   --win:#2ecc71; --win-soft:#0f2b1c; --loss:#ff5a64; --loss-soft:#331418; --live:#ff5a64;
   --bg:#0a1120; --surface:#121c33; --surface-2:#182441; --surface-3:#20304f; --border:#26355a; --border-2:#354769;
-  --ink:#ecf2ff; --text:#dce5f7; --text-2:#9aa9c6; --text-3:#637293;
+  --ink:#ecf2ff; --text:#dce5f7; --text-2:#9aa9c6; --text-3:#8fa0c0;
   --shadow-xs:0 1px 2px rgba(0,0,0,.4); --shadow-sm:0 2px 6px rgba(0,0,0,.45);
   --shadow-md:0 8px 24px -8px rgba(0,0,0,.6); --shadow-lg:0 20px 44px -12px rgba(0,0,0,.7);
 }
@@ -308,8 +308,8 @@ table.standings tbody tr.qualify td:first-child { box-shadow: inset 3px 0 0 var(
 table.standings tbody tr.qualify .rank { color: var(--brand); }
 table.standings tbody tr.champion td { background: color-mix(in srgb, var(--gold) 8%, transparent); }
 table.standings tbody tr.champion td:first-child { box-shadow: inset 3px 0 0 var(--gold); }
-table.standings tbody tr.champion .rank { color: #b45309; }
-table.standings tbody tr.champion .pts { color: #b45309; }
+table.standings tbody tr.champion .rank { color: var(--sun-ink); }
+table.standings tbody tr.champion .pts { color: var(--sun-ink); }
 table.standings tbody tr:hover td { background: color-mix(in srgb, var(--brand) 7%, transparent); }
 
 /* دليل الأداء (آخر النتائج) */
@@ -792,7 +792,7 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .pc-pts.pos { color: var(--win); background: color-mix(in srgb, var(--win) 13%, transparent); }
 
 /* شارات جدول الترتيب — بلون المسابقة */
-.prize-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: #b45309; background: color-mix(in srgb, var(--gold) 15%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
+.prize-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: var(--sun-ink); background: color-mix(in srgb, var(--gold) 15%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
 .me-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: var(--pc); background: color-mix(in srgb, var(--pc) 12%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
 table.standings tbody tr.is-me td { background: color-mix(in srgb, var(--pc) 9%, transparent); }
 table.standings tbody tr.is-me td:first-child { box-shadow: inset 3px 0 0 var(--pc); }
@@ -920,7 +920,7 @@ a.mp-team:hover .mp-team-name { text-decoration: underline; text-underline-offse
 
 /* ---- الدائرة العائمة للمسابقة (FAB) — تلتصق بالجوانب، تُسحب للحذف كـ365 ------ */
 .contest-fab {
-  position: fixed; z-index: 900;
+  position: fixed; z-index: 50;   /* تحت المودال (60) والتوست (80) */
   right: 16px; top: auto; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   width: 64px; height: 64px; border-radius: 50%; border: none;
   background: linear-gradient(135deg, #7c3aed, #4f46e5);
@@ -946,7 +946,7 @@ a.mp-team:hover .mp-team-name { text-decoration: underline; text-underline-offse
 .contest-fab.dragging::before { animation: none; opacity: 0; }
 .contest-fab .fab-badge {
   position: absolute; bottom: -9px; right: 50%; transform: translateX(50%);
-  background: #f59e0b; color: #3a2504; font-size: .6rem; font-weight: 800;
+  background: #f59e0b; color: #3a2504; font-size: .68rem; font-weight: 800;
   padding: 2px 9px; border-radius: 999px; white-space: nowrap;
   box-shadow: 0 2px 6px rgba(0,0,0,.18); pointer-events: none;
 }
@@ -954,7 +954,7 @@ a.mp-team:hover .mp-team-name { text-decoration: underline; text-underline-offse
 
 /* منطقة الحذف — تظهر أسفل الوسط أثناء السحب فقط */
 .fab-delete-zone {
-  position: fixed; z-index: 899; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom, 0px));
+  position: fixed; z-index: 49; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom, 0px));
   width: 60px; height: 60px; border-radius: 50%;
   display: grid; place-items: center;
   background: rgba(120, 120, 130, .28); color: #fff; font-size: 1.3rem;
@@ -981,3 +981,122 @@ a.mp-team:hover .mp-team-name { text-decoration: underline; text-underline-offse
 /* نافذة إعلان المسابقة (مرة واحدة لكل زائر) */
 .promo-hero { text-align: center; }
 .promo-ico { font-size: 3rem; line-height: 1; animation: fabFloat 2.6s ease-in-out infinite; display: inline-block; }
+
+/* ============================================================================
+   طبقة القشرة المرِحة — كانت theme-fun.css (دُمجت هنا لتوحيد المصدر: C1)
+   تُحمَّل آخراً فتفوز قيمها حيث تتعارض مع القسم الأقدم أعلاه — نفس ما كان
+   يحدث عندما كانت ملفاً منفصلاً. الرموز موحّدة في :root أعلى الملف.
+   ============================================================================ */
+h1, h2, h3, .brand, .page-title, .standings-title, .mp-score, .lc-score,
+.lc-stepper-val, .stat-val, .match-center .score, table.standings .pts {
+  font-family: var(--font-display);
+}
+.tabs { border-radius: 999px; }
+.tab { border-radius: 999px; transition: .15s var(--ease-pop); }
+.tab.active { background: var(--brand); color: #fff; box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--brand) 55%, transparent); }
+.tab.pc-tab.active { background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; box-shadow: none; }
+.btn-primary { box-shadow: 0 3px 0 var(--brand-deep); }
+.btn-primary:active { transform: translateY(3px); box-shadow: 0 0 0 var(--brand-deep); }
+.btn { transition: .15s var(--ease-pop); }
+.t-card { border-radius: var(--radius-lg); transition: transform .15s var(--ease-pop), box-shadow .15s, border-color .15s; }
+.t-card:hover { transform: translateY(-4px) rotate(-.3deg); border-color: var(--brand-softer); }
+.t-progress .bar { height: 8px; }
+.match { transition: transform .15s var(--ease-pop), border-color .15s, box-shadow .15s; }
+.match.tappable:hover { transform: translateY(-2px); border-color: var(--brand-softer); }
+.match-center .score { background: var(--brand-soft); font-weight: 800; }
+.match.is-live .score { background: var(--live); color: #fff; }
+.match-center .score.pending { background: transparent; }
+.mp-scoreboard, .lc-scoreboard { border-radius: 26px; position: relative; overflow: hidden; }
+.mp-scoreboard::after, .lc-scoreboard::after {
+  content: ""; position: absolute; inset-inline-end: -30px; inset-block: -40px; width: 150px;
+  background: rgba(255,255,255,.09); transform: skewX(-18deg); pointer-events: none;
+}
+.mp-scoreboard.is-live { box-shadow: 0 0 0 3px var(--live), var(--shadow-md); }
+table.standings .pts { color: var(--brand); font-size: 1rem; }
+.form-dot { width: 18px; height: 18px; border-radius: 6px; }
+.chip { border-width: 1.5px; transition: .15s var(--ease-pop); }
+.chip:hover { transform: translateY(-1px); }
+.badge { font-weight: 800; }
+.empty .icon { font-size: 2.6rem; opacity: 1; }
+@media (hover: none) and (pointer: coarse) {
+  .match.tappable:active, .t-card:active, .team-card:active { transform: scale(.985); }
+  .chip:active, .tab:active { transform: scale(.96); }
+}
+
+/* ============================================================================
+   إصلاحات QA الشاملة — تناسق/وصولية/جوال (A/C/E)
+   ============================================================================ */
+
+/* A9: أيقونة مربّع الإحصائية (كانت ساقطة من النقل عن مجلد التصميم) */
+.stat-tile .stat-ico { font-size: 1.2rem; line-height: 1; margin-bottom: 4px; }
+
+/* A8: أزرار البطاقات في الكونسول المباشر — رموز تتكيّف مع الداكن */
+.lc-yellow { background: var(--sun-soft); border-color: color-mix(in srgb, var(--sun) 55%, transparent); color: var(--sun-ink); }
+.lc-red { background: var(--loss-soft); border-color: color-mix(in srgb, var(--loss) 45%, transparent); color: var(--loss); }
+
+/* A10: تبويبات الجوال تلتف لسطرين بدل قصّها عند الحافة */
+@media (max-width: 640px) {
+  .tabs { flex-wrap: wrap; border-radius: var(--radius-lg); }
+}
+
+/* C4: شارة «قيد الموافقة» على هيرو المسابقة — بديل الألوان المضمّنة الضعيفة */
+.pc-badge-in.is-pending { background: rgba(0, 0, 0, .28); color: #ffd98a; }
+
+/* C5: رابط الرجوع الموحَّد (كان نمطاً مضمّناً مكرَّراً 8 مرات) */
+.back-link { background: transparent; color: var(--text-2); padding: 0; font-size: .85rem; }
+
+/* C7: زر زجاجي فوق الخلفيات الملوّنة/المتدرّجة */
+.btn-glass { background: rgba(255, 255, 255, .16); color: #fff; border-color: transparent; }
+.btn-glass:hover { background: rgba(255, 255, 255, .26); }
+
+/* C8: مدخلات لاتينية داخل صفحة RTL */
+.input-ltr { direction: ltr; text-align: end; }
+.ltr-start { direction: ltr; text-align: start; }
+
+/* C6: حلقة تركيز موحّدة لكل العناصر التفاعلية (كانت للأزرار فقط) */
+.tab:focus-visible, .chip:focus-visible, .seg-btn:focus-visible, .icon-btn:focus-visible,
+.link-btn:focus-visible, .pc-subtab:focus-visible, .header-icon-btn:focus-visible,
+.header-link:focus-visible, .pw-toggle:focus-visible, .contest-fab:focus-visible,
+.bk-edit-btn:focus-visible {
+  outline: 2px solid var(--ring); outline-offset: 2px;
+}
+
+/* E14: جداول قابلة للتمرير أفقياً على الشاشات الضيقة */
+.table-scroll { overflow-x: auto; }
+.table-scroll table { table-layout: auto; min-width: 520px; }
+
+/* E2+E3: جوّال — حقول ≥16px (يمنع زوم iOS القسري) وأهداف لمس ≥44px */
+@media (hover: none) and (pointer: coarse) {
+  .input, .select, textarea.input, .filter-select { font-size: 16px; }
+  .header-icon-btn { width: 44px; height: 44px; }
+  .pw-toggle, .seg-btn, .pc-subtab, .link-btn, .bk-edit-btn { min-height: 44px; }
+  .pc-num { width: 48px; min-height: 44px; }
+}
+
+/* E12: احترام تقليل الحركة في التمرير الناعم أيضاً */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+/* E13: المودال على iOS — ارتفاع المنفذ الديناميكي وأمان الحافة السفلية */
+.modal { max-height: min(90vh, 90dvh); }
+.modal-backdrop { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+
+/* E11/الطباعة: إخفاء العناصر التفاعلية وطباعة ألوان فاتحة دائماً */
+@media print {
+  .contest-fab, .fab-delete-zone, .filter-selects, .pc-cta, .header-auth, .toast-host { display: none !important; }
+  :root, :root[data-theme="dark"] {
+    --bg: #fff; --surface: #fff; --surface-2: #f5f5f5; --ink: #111; --text: #222;
+    --text-2: #444; --text-3: #666; --border: #ccc;
+  }
+}
+
+/* E8: تباين هيرو المسابقة — نهاية تدرّج أغمق ونصوص بلا شفافية */
+.pc-hero { background: linear-gradient(135deg, var(--pc), #a21caf); }
+.pc-hero-sub { opacity: 1; color: rgba(255, 255, 255, .95); }
+.pc-join-txt { color: rgba(255, 255, 255, .95); }
+
+/* E15: رفع النصوص متناهية الصغر إلى حدّ مقروء */
+table.standings th { font-size: .72rem; }
+.match .time .grp { font-size: .72rem; }
+.contest-fab .fab-badge { font-size: .68rem; }
