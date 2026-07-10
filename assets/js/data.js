@@ -704,6 +704,20 @@ export async function updateMatch(id, patch) {
   // إن مسّ التعديل التاريخ/الوقت نعيد حساب موعد قفل التوقّع
   if ("match_date" in p || "match_time" in p) p.locks_at = matchLockMillis(p.match_date, p.match_time);
   await updateDoc(doc(requireDb(), "matches", id), clean(p));
+  // ختم لحظة الانتهاء الفعلية (للتدقيق): مرّة واحدة عند أول انتهاء فقط، فلا يُطمَس الوقت
+  // الأصلي عند تعديل مباراة منتهية لاحقاً. كتابة منفصلة «أفضل جهد»: لو لم تُنشر قواعد
+  // finished_at بعد تُرفض وحدها ويبقى إنهاء المباراة سليماً (لا نُدرجها في الكتابة الأساسية)
+  if (p.status === "finished") {
+    let already;
+    try { already = (await getDoc(doc(requireDb(), "matches", id))).data()?.finished_at; } catch (e) { console.warn(e); }
+    if (already == null) {
+      const fa = Date.now();
+      try { await updateDoc(doc(requireDb(), "matches", id), { finished_at: fa }); p.finished_at = fa; }
+      catch (e) { console.warn("finished_at — انشر قواعد Firestore لتفعيل وقت الانتهاء", e); }
+    } else {
+      p.finished_at = already;   // احتفظ بالوقت الأصلي في القيمة المُعادة دون إعادة ختم
+    }
+  }
   return { id, ...p };
 }
 
@@ -1344,6 +1358,13 @@ export async function savePrediction(comp, match, home, away) {
   };
   await setDoc(doc(requireDb(), "predictions", id), clean(data));
   return { id, ...data };
+}
+
+// حذف توقّع واحد (بيد المنظّم — للغش مثلاً). تُسقط نقاطه تلقائياً عند إعادة الاحتساب،
+// إذ يُحتسب الترتيب من التوقّعات الموجودة فقط (computePredictionStandings)
+export async function deletePrediction(id) {
+  if (!id) throw new Error("missing prediction id");
+  await deleteDoc(doc(requireDb(), "predictions", id));
 }
 
 // ---- الاحتساب (دوال صرفة) --------------------------------------------------
