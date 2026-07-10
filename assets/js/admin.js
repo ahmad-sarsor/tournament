@@ -827,6 +827,12 @@ async function renderPredictionsAdmin(host, state) {
     ]));
   }
   mount(host, wrap);
+
+  // مزامنة صامتة لمواعيد القفل المخزَّنة مع الصيغة الحالية (قفل قبل ساعة) — كي تفرضها
+  // قواعد الخادم على المباريات القائمة أيضاً. آمنة للتكرار: لا تكتب إلا عند وجود اختلاف.
+  api.syncMatchLocks(tournament.id)
+    .then((n) => { if (n) toast(t.locksSynced.replace("{n}", String(n)), "ok"); })
+    .catch((e) => console.warn("syncMatchLocks", e));
 }
 
 // تصدير صورة (PNG) لجدول الترتيب — للمنظّم فقط. يجلب البيانات ثم يرسمها على canvas.
@@ -1066,6 +1072,8 @@ async function loadParticipants(body, comp, tournament) {
           el("td", { text: c.age != null ? String(c.age) : "—" }),
           el("td", {}, [el("span.pts", { text: String(r.points) })]),
           el("td", {}, [el("div", { style: "display:flex;gap:4px" }, [
+            el("button.icon-btn", { text: "👁", title: t.viewPredictions,
+              onclick: () => participantPredictionsModal(comp, r, predictions, bundle) }),
             el("button.icon-btn", { text: "✎", title: t.editParticipant,
               onclick: () => participantEditForm(comp, r, contactByUid.get(r.predictor.uid) || null, reload) }),
             el("button.icon-btn", { text: "🗑", title: t.deleteParticipant, onclick: async () => {
@@ -1100,6 +1108,54 @@ async function loadParticipants(body, comp, tournament) {
   } catch (e) {
     mount(body, el("div.alert.alert-error", { text: e.message || t.errorGeneric }));
   }
+}
+
+// عرض كل توقّعات مشارك مع الوقت الدقيق لوضع كل توقّع (للمنظّم) — من الطلب: «متى وضع التوقّع»
+function participantPredictionsModal(comp, row, predictions, bundle) {
+  const p = row.predictor;
+  const teamById = new Map(bundle.teams.map((tm) => [tm.id, tm]));
+  const matchById = new Map(bundle.matches.map((m) => [m.id, m]));
+  const order = new Map(bundle.matches.map((m, i) => [m.id, i]));
+  const cfg = api.compScoring(comp);
+  const mine = predictions.filter((x) => x.uid === p.uid)
+    .sort((a, b) => (order.get(a.match_id) ?? 1e9) - (order.get(b.match_id) ?? 1e9));
+
+  const body = el("div");
+  if (!mine.length) {
+    body.appendChild(emptyState("🔮", t.noPredictionsYet));
+  } else {
+    const trs = mine.map((pr) => {
+      const m = matchById.get(pr.match_id);
+      const home = m ? (teamById.get(m.home_team_id)?.name || "—") : "—";
+      const away = m ? (teamById.get(m.away_team_id)?.name || "—") : "—";
+      const counted = m && api.isCounted(m);
+      const result = counted ? `${m.home_score} : ${m.away_score}` : (m ? matchStatusLabel(m.status) : "—");
+      const pts = counted ? api.predictionPoints(pr, m, cfg) : null;
+      // مقارنة وقت الحفظ بموعد القفل: وسم «بعد القفل» للتوقّعات المتأخّرة (شفافية للمنظّم)
+      const late = (m && m.locks_at != null && pr.created_at != null) ? pr.created_at >= m.locks_at : false;
+      return el("tr", {}, [
+        el("td.team-col", { text: `${home} × ${away}` }),
+        el("td", { style: "font-weight:800;white-space:nowrap", text: `${pr.home} : ${pr.away}` }),
+        el("td", { style: "white-space:nowrap", text: result }),
+        pts != null ? el("td", {}, [el("span.pts", { text: "+" + pts })]) : el("td", { text: "—" }),
+        el("td", { style: "direction:ltr;text-align:start;white-space:nowrap;font-size:.8rem" }, [
+          el("span", { text: fmtWhen(pr.created_at) || "—" }),
+          late ? el("span.badge.badge-finished", { style: "margin-inline-start:6px", text: t.predAfterLock }) : null,
+        ]),
+      ]);
+    });
+    body.appendChild(el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:520px" }, [
+      el("thead", {}, [el("tr", {}, [
+        el("th.team-col", { text: t.th_match }),
+        el("th", { text: t.th_guess }),
+        el("th", { text: t.th_predResult }),
+        el("th.pts-col", { text: t.th_pts_total }),
+        el("th", { text: t.th_predAt }),
+      ])]),
+      el("tbody", {}, trs),
+    ])]));
+  }
+  openModal({ title: "👁 " + t.predictionsOf.replace("{name}", p.name || "—"), body });
 }
 
 // نموذج تعديل مشارك بيد المنظّم: اسم/هاتف/بريد/عمر + «تسوية النقاط» (±)

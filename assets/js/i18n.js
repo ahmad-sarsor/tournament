@@ -533,8 +533,9 @@ export const t = {
   savePrediction: "حفظ",
   predictionSaved: "تم حفظ توقّعك",
   predictionLocked: "بدأت المباراة — أُقفل التوقّع",
-  predLockHint: "يُقفل التوقّع تلقائياً عند بدء المباراة أو حلول موعدها (أيّهما أسبق). النقاط تُحتسب عند انتهائها.",
-  predDeadlinePassed: "أُغلق التوقّع (حان الموعد)",
+  predLockHint: "يُقفل التوقّع تلقائياً قبل انطلاق المباراة بساعة. النقاط تُحتسب عند انتهاء المباراة.",
+  predDeadlinePassed: "أُغلق التوقّع (انتهى الموعد)",
+  locksAtLabel: "يُقفل",   // يسبق موعد القفل في صفّ التوقّع، مثل: «يُقفل: الخميس 10/07 · 19:00»
   noMatchesToPredict: "لا مباريات متاحة للتوقّع بعد",
   yourGuess: "توقّعك",
   finalResult: "النتيجة",
@@ -594,6 +595,16 @@ export const t = {
   th_phone: "الهاتف",
   th_contact: "التواصل",
   th_joinedAt: "التسجيل",
+  // مستعرِض توقّعات المشارك (للمنظّم)
+  viewPredictions: "التوقّعات",
+  predictionsOf: "توقّعات: {name}",
+  th_match: "المباراة",
+  th_guess: "التوقّع",
+  th_predResult: "النتيجة",
+  th_predAt: "وقت التوقّع",
+  noPredictionsYet: "لم يضع هذا المشارك أي توقّع بعد",
+  predAfterLock: "بعد القفل",
+  locksSynced: "حُدِّثت مواعيد قفل {n} مباراة",
   compSaved: "تم حفظ المسابقة",
   deleteCompetitionQ: "حذف مسابقة التوقّعات وكل توقّعات المشاركين وبياناتهم؟ لا يمكن التراجع.",
   compLaunchHint: "اجعل الحالة «مفتوحة» لتظهر للجمهور ويبدأ التسجيل والتوقّع.",
@@ -640,6 +651,14 @@ export function formatTime(time) {
   if (!time) return "";
   const parts = String(time).split(":");
   return `${parts[0].padStart(2, "0")}:${(parts[1] || "00").padStart(2, "0")}`;
+}
+
+// وسم لحظة (ms) بصيغة عربية مختصرة: «اليوم DD/MM · HH:MM» — لعرض موعد القفل ووقت التوقّع
+export function formatDateTime(ms) {
+  if (ms == null || !Number.isFinite(Number(ms))) return "";
+  const d = new Date(Number(ms));
+  const p = (n) => String(n).padStart(2, "0");
+  return `${t.weekdays[d.getDay()]} ${p(d.getDate())}/${p(d.getMonth() + 1)} · ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
 export function statusLabel(s) {

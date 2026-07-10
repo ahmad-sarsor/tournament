@@ -3,7 +3,7 @@
 // ============================================================================
 import { isConfigured } from "./firebase.js";
 import { SITE_NAME } from "./config.js";
-import { t, statusLabel, matchStatusLabel, formatDate, formatTime, weekdayName } from "./i18n.js";
+import { t, statusLabel, matchStatusLabel, formatDate, formatTime, formatDateTime, weekdayName } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast, openModal } from "./util.js";
 import {
   fetchTournaments, fetchTournament, fetchTournamentBundle, subscribeTournament, isCounted, computeGroupStandings,
@@ -889,15 +889,15 @@ function predictionMatchRow(comp, m, teamById, myPred, acceptsEntries, lockNote)
       catch (e) { toast(contestAuthMsg(e), "err"); }
       finally { saveBtn.disabled = false; }
     });
-    // تذكير قرب القفل (ساعتان فأقل) — كي لا يفوت المشارك الموعد
-    let soonMeta = null;
+    // موعد القفل معروض دائماً (قبل انطلاق المباراة بساعة) + تذكير عاجل حين يقترب (ساعتان فأقل)
+    let lockMeta = null;
     if (m.locks_at != null) {
       const mins = Math.round((m.locks_at - Date.now()) / 60000);
-      if (mins <= 120) soonMeta = el("div.pc-row-meta", {}, [
-        el("span.pc-lock-note", { text: "⏱ " + t.locksInMin.replace("{m}", String(Math.max(1, mins))) }),
-      ]);
+      const notes = [el("span.pc-lock-note", { text: "🔒 " + t.locksAtLabel + ": " + formatDateTime(m.locks_at) })];
+      if (mins <= 120) notes.unshift(el("span.pc-lock-note", { style: "color:var(--loss);font-weight:700", text: "⏱ " + t.locksInMin.replace("{m}", String(Math.max(1, mins))) }));
+      lockMeta = el("div.pc-row-meta", {}, notes);
     }
-    return el("div.pc-row", {}, [nameH, el("div.pc-row-mid", {}, [inH, el("span.pc-colon", { text: ":" }), inA]), nameA, saveBtn, soonMeta]);
+    return el("div.pc-row", {}, [nameH, el("div.pc-row-mid", {}, [inH, el("span.pc-colon", { text: ":" }), inA]), nameA, saveBtn, lockMeta]);
   }
 
   // مقفلة (بدأت المباراة أو حلّ موعدها)

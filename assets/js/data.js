@@ -102,7 +102,7 @@ export async function fetchTournamentBundle(tid) {
   return {
     groups: mapDocs(g).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     teams: mapDocs(tm).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
-    matches: mapDocs(mt).sort(byMatchOrder),
+    matches: mapDocs(mt).map(withLock).sort(byMatchOrder),
     players: mapDocs(pl).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0)),
     events: mapDocs(ev).sort(byEventOrder),
   };
@@ -670,14 +670,23 @@ export async function deleteTeam(id) {
   await deleteDoc(doc(requireDb(), "teams", id));
 }
 
-// موعد قفل التوقّع = لحظة بدء المباراة (تاريخ+وقت محلّيان) بالمللي ثانية، أو null إن نقص أحدهما
+// مهلة القفل قبل انطلاق المباراة: تُقفل التوقّعات قبل بدء المباراة بساعة
+export const PRED_LOCK_LEAD_MS = 60 * 60 * 1000;
+
+// موعد قفل التوقّع = لحظة بدء المباراة ناقص المهلة (تاريخ+وقت محلّيان) بالمللي ثانية، أو null إن نقص أحدهما
 export function matchLockMillis(date, time) {
   if (!date || !time) return null;
   const [y, m, d] = String(date).split("-").map(Number);
   if (!y || !m || !d) return null;
   const [hh, mm] = String(time).split(":").map(Number);
   const ms = new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0).getTime();
-  return Number.isFinite(ms) ? ms : null;
+  return Number.isFinite(ms) ? ms - PRED_LOCK_LEAD_MS : null;
+}
+
+// إعادة اشتقاق موعد القفل من التاريخ/الوقت عند القراءة — كي يُطبَّق تعديل المهلة
+// فوراً على كل المباريات (حتى القديمة) لدى كل من يعرض الصفحة بلا انتظار مزامنة
+function withLock(m) {
+  return { ...m, locks_at: matchLockMillis(m.match_date, m.match_time) };
 }
 
 export async function createMatch(p) {
@@ -805,6 +814,23 @@ export async function removeEvent(event, match, teamGoalEvents = 0) {
 // حذف حدث خام دون أي تعديل على النتيجة (لتنظيف الأحداث المكرّرة التي لم تُغيّر النتيجة)
 export async function deleteEvent(id) {
   await deleteDoc(doc(requireDb(), "events", id));
+}
+
+// مزامنة موعد القفل المخزَّن مع الصيغة الحالية (بعد تغيير مهلة القفل) — للمنظّم فقط.
+// تقرأ القيمة الخام (بلا إعادة اشتقاق) وتحدّث ما اختلف فقط، كي تفرض قواعد الخادم موعد
+// القفل الصحيح حتى على المباريات المنشأة قبل التغيير. آمنة للتكرار (لا تكتب إن تطابق كلّه).
+export async function syncMatchLocks(tid) {
+  const d = requireDb();
+  const snap = await getDocs(query(collection(d, "matches"), where("tournament_id", "==", tid)));
+  const stale = mapDocs(snap).filter((m) => (m.locks_at ?? null) !== (matchLockMillis(m.match_date, m.match_time) ?? null));
+  let fixed = 0;
+  for (let i = 0; i < stale.length; i += 450) {
+    const b = writeBatch(d);
+    for (const m of stale.slice(i, i + 450)) b.update(doc(d, "matches", m.id), { locks_at: matchLockMillis(m.match_date, m.match_time) });
+    await b.commit();
+    fixed += Math.min(450, stale.length - i);
+  }
+  return fixed;
 }
 
 export async function insertMatches(rows) {
@@ -1064,7 +1090,8 @@ export function subscribeTournament(tid, onChange) {
   let t = null;
   const emit = () => { clearTimeout(t); t = setTimeout(() => { if (c.ready) onChange(); }, 250); };
   const onColl = (coll, snap) => {
-    c[coll] = mapDocs(snap).sort(sorters[coll]);
+    const rows = mapDocs(snap);
+    c[coll] = (coll === "matches" ? rows.map(withLock) : rows).sort(sorters[coll]);
     if (!c.ready) { delivered.add(coll); if (delivered.size >= 5) c.ready = true; } // أول تهيئة بلا onChange
     else emit();
   };
