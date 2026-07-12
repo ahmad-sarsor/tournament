@@ -532,6 +532,10 @@ export const t = {
 
   // إدخال التوقّعات
   myPredictions: "توقّعاتي",
+  // تذكير مباريات اليوم (نافذة عند الدخول)
+  predictTodayTitle: "مباريات اليوم — ضع توقّعك",
+  predictTodayIntro: "لديك مباريات اليوم لم تتوقّعها بعد. ضع توقّعك الآن من هنا، أو انتقل إلى كل التوقّعات.",
+  predictTodayGoAll: "كل التوقّعات",
   savePrediction: "حفظ",
   predictionSaved: "تم حفظ توقّعك",
   predictionLocked: "بدأت المباراة — أُقفل التوقّع",
