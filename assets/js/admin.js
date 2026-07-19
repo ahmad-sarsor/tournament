@@ -1910,33 +1910,49 @@ function autoScheduleForm(state) {
     title: "🗓 جدولة تلقائية",
     submitText: "معاينة الجدول",
     fields: [
+      { name: "strategy", label: "آلية التوزيع", type: "select", value: "mixed", options: [
+        { value: "mixed", label: "مختلط: بيوت أساسية + ثانوي بالتناوب (المعتمد)" },
+        { value: "one-house-per-day", label: "بيت واحد لكل يوم (تتناوب البيوت)" },
+        { value: "one-per-house", label: "مباراة من كل بيت في اليوم نفسه" },
+      ] },
       { name: "start_date", label: "تاريخ أوّل يوم", type: "date", value: tournament.start_date || "" },
       { name: "start_time", label: "وقت أوّل مباراة", type: "time", value: "18:30" },
       { name: "gap", label: "دقائق بين كل مباراة وأخرى", type: "number", value: 30, attrs: { min: 1, inputmode: "numeric" } },
-      { name: "first_day", label: "عدد مباريات اليوم الأوّل (من البيوت الأساسية)", type: "number", value: 3, attrs: { min: 1, inputmode: "numeric" } },
+      { name: "times", label: "أوقات مخصّصة (اختياري، افصلها بفاصلة) — تتجاوز البداية/الفارق",
+        type: "text", value: "", attrs: { placeholder: "18:30, 19:00, 19:30, 20:00" } },
+      { name: "first_day", label: "عدد مباريات اليوم الأوّل — (مختلط فقط)", type: "number", value: 3, attrs: { min: 1, inputmode: "numeric" } },
       { name: "other_day", label: "عدد مباريات باقي الأيام", type: "number", value: 4, attrs: { min: 1, inputmode: "numeric" } },
+      { name: "sec_first", label: "إدراج مباراة ثانوي في اليوم الأوّل؟ — (مختلط)", type: "select", value: "yes",
+        options: [{ value: "yes", label: "نعم (المعتمد) — اليوم الأوّل: أساسي + ثانوي" }, { value: "no", label: "لا — اليوم الأوّل أساسي فقط" }] },
       { name: "skip_fri", label: "تخطّي أيام الجمعة", type: "select", value: "no",
         options: [{ value: "no", label: "لا — أيام متتالية" }, { value: "yes", label: "نعم — تخطَّ الجمعة" }] },
     ],
     onSubmit: async (v, close) => {
       if (!v.start_date) return toast("اختر تاريخ أوّل يوم", "err");
-      const primaryPerDay = toInt(v.first_day, 3);
-      const otherDay = toInt(v.other_day, 4);
-      const secondaryPerDay = Math.max(0, otherDay - primaryPerDay);
+      // أوقات مخصّصة: نقبل فواصل عربية/لاتينية أو مسافات، ونتحقّق من صيغة HH:MM
+      const times = String(v.times || "").split(/[,،\s]+/).map((s) => s.trim()).filter(Boolean);
+      if (times.length && !times.every((tt) => /^\d{1,2}:\d{2}$/.test(tt)))
+        return toast("صيغة الأوقات يجب أن تكون HH:MM مفصولة بفاصلة", "err");
       const opts = {
+        strategy: v.strategy || "mixed",
         startDate: v.start_date,
         startTime: v.start_time || "18:30",
         gapMin: toInt(v.gap, 30),
-        primaryPerDay,
-        secondaryPerDay,
-        secondaryStartDayIdx: 1,                       // اليوم الأوّل بلا مباريات تناوبيّة
+        times: times.length ? times : undefined,
+        firstDayCount: toInt(v.first_day, 3),
+        otherDayCount: toInt(v.other_day, 4),
+        matchesPerDay: toInt(v.other_day, 4),          // تُستخدم في آليتَي «بيت/يوم» و«من كل بيت»
+        secondaryPerDay: 1,
+        secondaryFromFirstDay: v.sec_first !== "no",   // المعتمد: نعم
         secondaryOrder: secGroups.map((g) => g.id),
         skipFridays: v.skip_fri === "yes",
       };
       const plan = api.planLeagueSchedule(groups, teams, matches, opts);
       if (!plan.length) return toast("تعذّر توليد الجدول — تحقّق من الفرق والبيوت", "err");
       close();
-      previewAndApplySchedule(state, plan, { primaryLabel: priGroups.map((g) => g.name).join("، "), rot });
+      const rotInfo = opts.strategy === "mixed" ? rot : "—";
+      const priInfo = opts.strategy === "mixed" ? priGroups.map((g) => g.name).join("، ") : "كل البيوت بالتساوي";
+      previewAndApplySchedule(state, plan, { primaryLabel: priInfo, rot: rotInfo });
     },
   });
 }

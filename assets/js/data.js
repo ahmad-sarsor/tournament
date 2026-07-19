@@ -1096,18 +1096,19 @@ export function buildFixtures(tournamentId, groups, teams) {
 }
 
 // ---- جدولة تلقائية للدوري ---------------------------------------------------
-// توزّع التواريخ والأوقات على مباريات موجودة وفق نمط يومي:
-//   • البيوت «الأساسية» تملأ أوّل مباريات كل يوم (primaryPerDay).
-//   • البيوت «التناوبية» (secondaryOrder) تملأ الخانات الأخيرة بالتناوب (secondaryPerDay)،
-//     وتبدأ من اليوم رقم secondaryStartDayIdx (لذلك يكون اليوم الأول أقلّ مباريات).
+// توزّع التواريخ والأوقات على مباريات موجودة وفق «آلية» مختارة:
+//   • "mixed"             — بيوت أساسية تملأ أوّل الخانات + بيوت تناوبية (secondaryOrder)
+//                            تملأ الأخيرة بالتناوب. secondaryFromFirstDay=true يُدرج ثانوي
+//                            في اليوم الأوّل (فيكون 2 أساسي + 1 تناوبي).
+//   • "one-house-per-day" — كل يوم مخصّص لبيت واحد، والبيوت تتناوب يومياً.
+//   • "one-per-house"     — كل يوم مباراة واحدة من كل بيت لديه مباريات (بالتوازي).
+// الأوقات: إمّا opts.times (مصفوفة "HH:MM" لكل خانة) أو startTime + gapMin.
 // ضمانات: لا يلعب فريق مباراتين في اليوم نفسه، وكل مباراة تُجدول مرّة واحدة فقط.
 // دالّة خالصة (بلا شبكة) — تُعيد [{ id, group_id, home_team_id, away_team_id, match_date, match_time }].
 export function planLeagueSchedule(groups, teams, matches, opts) {
   const pairKey = (a, b) => [a, b].sort().join("~");
-  const secondaryIds = (opts.secondaryOrder || []).filter((id) => groups.some((g) => g.id === id));
   const gById = (id) => groups.find((g) => g.id === id);
-  const primaryIds = groups.map((g) => g.id).filter((id) => !secondaryIds.includes(id))
-    .sort((a, b) => (gById(a)?.sort_order || 0) - (gById(b)?.sort_order || 0));
+  const allIds = groups.map((g) => g.id).sort((a, b) => (gById(a)?.sort_order || 0) - (gById(b)?.sort_order || 0));
   const houseQueue = (gid) => {
     const tIds = teams.filter((x) => x.group_id === gid)
       .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.id < b.id ? -1 : 1)).map((x) => x.id);
@@ -1123,63 +1124,115 @@ export function planLeagueSchedule(groups, teams, matches, opts) {
     return q;
   };
   const Q = {};
-  [...primaryIds, ...secondaryIds].forEach((id) => { Q[id] = houseQueue(id); });
+  allIds.forEach((id) => { Q[id] = houseQueue(id); });
   const rem = (id) => Q[id].length;
-  const primaryPerDay = Math.max(1, opts.primaryPerDay || 1);
-  const secondaryPerDay = Math.max(0, opts.secondaryPerDay || 0);
-  const secStartDay = opts.secondaryStartDayIdx ?? 1;
+  const clash = (used, m) => used.has(m.home_team_id) || used.has(m.away_team_id);
+  // اسحب أوّل مباراة من بيت لا تتعارض فرقها مع فرق اللاعبين هذا اليوم
+  const takeNonClashing = (gid, used) => {
+    const i = Q[gid].findIndex((m) => !clash(used, m));
+    return i < 0 ? null : Q[gid].splice(i, 1)[0];
+  };
 
-  const days = [];
-  let secCursor = 0, guard = 0;
-  while (primaryIds.some(rem) || secondaryIds.some(rem)) {
-    if (++guard > 1000) break;                       // صمّام أمان ضد أي حلقة لا نهائية
-    const dayIdx = days.length;
-    const day = { primary: [], secondary: [] };
-    const used = new Set();                           // فرق لعبت هذا اليوم
-    // مباريات البيوت الأساسية — نفضّل بيتاً لم يُستعمل اليوم والأكثر مباريات متبقّية
-    while (day.primary.length < primaryPerDay) {
-      const usedHouses = new Set(day.primary.map((m) => m.group_id));
-      const ok = (id) => { const m = Q[id][0]; return m && !used.has(m.home_team_id) && !used.has(m.away_team_id); };
-      let cands = primaryIds.filter((id) => rem(id) && !usedHouses.has(id) && ok(id));
-      if (!cands.length) cands = primaryIds.filter((id) => rem(id) && ok(id));   // اضطراراً: بيت مكرّر بلا تعارض فرق
-      if (!cands.length) break;
-      cands.sort((a, b) => rem(b) - rem(a) || (gById(a).sort_order - gById(b).sort_order));
-      const m = Q[cands[0]].shift();
-      day.primary.push(m); used.add(m.home_team_id); used.add(m.away_team_id);
+  const strategy = opts.strategy || "mixed";
+  const firstDayCount = Math.max(1, opts.firstDayCount || opts.matchesPerDay || 3);
+  const otherDayCount = Math.max(1, opts.otherDayCount || opts.matchesPerDay || 4);
+  const days = [];                                     // كل عنصر: مصفوفة مباريات مرتّبة لليوم
+  let guard = 0;
+
+  if (strategy === "one-house-per-day") {
+    const perDay = otherDayCount;
+    let cursor = 0;
+    while (allIds.some(rem)) {
+      if (++guard > 2000) break;
+      let gid = null;                                  // البيت التالي (بالدوران) الذي لديه مباريات
+      for (let k = 0; k < allIds.length; k++) {
+        const id = allIds[(cursor + k) % allIds.length];
+        if (rem(id)) { gid = id; cursor = (cursor + k + 1) % allIds.length; break; }
+      }
+      if (!gid) break;
+      const day = [], used = new Set();
+      while (day.length < perDay) {
+        const m = takeNonClashing(gid, used);
+        if (!m) break;
+        day.push(m); used.add(m.home_team_id); used.add(m.away_team_id);
+      }
+      if (day.length) days.push(day); else break;
     }
-    // المباراة/المباريات التناوبية — تدور على البيوت التناوبية بالترتيب
-    if (dayIdx >= secStartDay) {
-      let s = 0;
-      while (s < secondaryPerDay && secondaryIds.some(rem)) {
+  } else if (strategy === "one-per-house") {
+    const cap = Math.max(1, opts.matchesPerDay || otherDayCount || allIds.length);
+    while (allIds.some(rem)) {
+      if (++guard > 2000) break;
+      const day = [], used = new Set();
+      for (const id of allIds) {
+        if (day.length >= cap) break;
+        if (!rem(id)) continue;
+        const m = takeNonClashing(id, used);
+        if (m) { day.push(m); used.add(m.home_team_id); used.add(m.away_team_id); }
+      }
+      if (day.length) days.push(day); else break;
+    }
+  } else {                                             // mixed (المعتمد)
+    const secIds = (opts.secondaryOrder || []).filter((id) => allIds.includes(id));
+    const priIds = allIds.filter((id) => !secIds.includes(id));
+    const secondaryPerDay = Math.max(0, opts.secondaryPerDay ?? 1);
+    const secFromFirstDay = opts.secondaryFromFirstDay !== false;
+    let secCursor = 0;
+    while (priIds.some(rem) || secIds.some(rem)) {
+      if (++guard > 2000) break;                       // صمّام أمان ضد أي حلقة لا نهائية
+      const dayIdx = days.length;
+      const dayTotal = dayIdx === 0 ? firstDayCount : otherDayCount;
+      const secOn = secIds.length ? (secFromFirstDay ? true : dayIdx >= 1) : false;
+      const priCap = Math.max(0, dayTotal - (secOn ? secondaryPerDay : 0));
+      const day = [], used = new Set();
+      // أساسي: البيت الأكثر مباريات متبقّية، بلا تكرار بيت/فريق في اليوم
+      while (day.length < priCap) {
+        const usedHouses = new Set(day.map((m) => m.group_id));
+        const okHouse = (id) => { const m = Q[id][0]; return m && !clash(used, m); };
+        let cands = priIds.filter((id) => rem(id) && !usedHouses.has(id) && okHouse(id));
+        if (!cands.length) cands = priIds.filter((id) => rem(id) && Q[id].some((m) => !clash(used, m)));
+        if (!cands.length) break;
+        cands.sort((a, b) => rem(b) - rem(a) || (gById(a).sort_order - gById(b).sort_order));
+        const m = takeNonClashing(cands[0], used);
+        if (!m) break;
+        day.push(m); used.add(m.home_team_id); used.add(m.away_team_id);
+      }
+      // تناوبي: يدور على البيوت التناوبية بالترتيب
+      let placed = 0;
+      while (secOn && placed < secondaryPerDay && secIds.some(rem)) {
         let tries = 0, got = null;
-        while (tries < secondaryIds.length) {
-          const gid = secondaryIds[secCursor % secondaryIds.length]; secCursor++;
-          if (rem(gid)) { got = Q[gid].shift(); break; }
+        while (tries < secIds.length) {
+          const gid = secIds[secCursor % secIds.length]; secCursor++;
+          if (rem(gid)) { got = takeNonClashing(gid, used) || Q[gid].shift(); break; }
           tries++;
         }
         if (!got) break;
-        day.secondary.push(got); s++;
+        day.push(got); used.add(got.home_team_id); used.add(got.away_team_id); placed++;
       }
+      if (!day.length) break;
+      days.push(day);
     }
-    if (!day.primary.length && !day.secondary.length) break;
-    days.push(day);
   }
 
-  // إسناد التواريخ والأوقات (مع خيار تخطّي أيام الجمعة)
+  // إسناد التواريخ والأوقات (أوقات مخصّصة أو بداية + فارق، مع خيار تخطّي أيام الجمعة)
+  const customTimes = Array.isArray(opts.times) ? opts.times.filter(Boolean) : null;
+  const [sh, smin] = String(opts.startTime || (customTimes && customTimes[0]) || "18:30").split(":").map(Number);
+  const gap = Math.max(1, opts.gapMin || 30);
+  const pad = (n) => String(n).padStart(2, "0");
+  const slotTime = (i) => {
+    if (customTimes && i < customTimes.length) return customTimes[i];
+    const tot = (smin || 0) + i * gap;
+    return `${pad((sh || 0) + Math.floor(tot / 60))}:${pad(tot % 60)}`;
+  };
   const out = [];
   const [sy, sm, sd] = String(opts.startDate).split("-").map(Number);
   const cur = new Date(sy, (sm || 1) - 1, sd || 1);
-  const [sh, smin] = String(opts.startTime || "18:30").split(":").map(Number);
-  const gap = Math.max(1, opts.gapMin || 30);
-  const pad = (n) => String(n).padStart(2, "0");
   const fmtD = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
   for (const day of days) {
     if (opts.skipFridays) while (cur.getDay() === 5) cur.setDate(cur.getDate() + 1);
-    [...day.primary, ...day.secondary].forEach((m, i) => {
-      const tot = (smin || 0) + i * gap;
+    day.forEach((m, i) => {
       out.push({
         id: m.id, group_id: m.group_id, home_team_id: m.home_team_id, away_team_id: m.away_team_id,
-        match_date: fmtD(cur), match_time: `${pad((sh || 0) + Math.floor(tot / 60))}:${pad(tot % 60)}`,
+        match_date: fmtD(cur), match_time: slotTime(i),
       });
     });
     cur.setDate(cur.getDate() + 1);
