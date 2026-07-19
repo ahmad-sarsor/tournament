@@ -1752,6 +1752,7 @@ function renderMatchesTab(host, state) {
   const bar = scorerOnly ? null : el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
     el("button.btn.btn-primary", { text: "＋ " + t.addMatch, onclick: () => matchForm(state, null) }),
     el("button.btn.btn-accent", { text: "⚡ " + t.generateFixtures, onclick: () => generateFixtures(state) }),
+    matches.length ? el("button.btn.btn-outline", { text: "🗓 جدولة تلقائية", onclick: () => autoScheduleForm(state) }) : null,
   ]);
 
   const list = el("div");
@@ -1896,6 +1897,95 @@ async function generateFixtures(state) {
     toast(t.fixturesDone + ` (${rows.length})` + (skipped ? ` · تم تجاهل ${skipped} مكرّرة` : ""), "ok");
     route();
   } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// ---- الجدولة التلقائية: نموذج الإعدادات ثم معاينة ثم تطبيق دفعة واحدة --------
+function autoScheduleForm(state) {
+  const { tournament, groups, teams, matches } = state;
+  if (!matches.length) return toast("لا توجد مباريات لجدولتها — ولّد المباريات أوّلاً", "err");
+  const secGroups = groups.filter((g) => /ثانوي/.test(g.name || "")).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const priGroups = groups.filter((g) => !/ثانوي/.test(g.name || ""));
+  const rot = secGroups.map((g) => g.name).join(" ← ") || "—";
+  formModal({
+    title: "🗓 جدولة تلقائية",
+    submitText: "معاينة الجدول",
+    fields: [
+      { name: "start_date", label: "تاريخ أوّل يوم", type: "date", value: tournament.start_date || "" },
+      { name: "start_time", label: "وقت أوّل مباراة", type: "time", value: "18:30" },
+      { name: "gap", label: "دقائق بين كل مباراة وأخرى", type: "number", value: 30, attrs: { min: 1, inputmode: "numeric" } },
+      { name: "first_day", label: "عدد مباريات اليوم الأوّل (من البيوت الأساسية)", type: "number", value: 3, attrs: { min: 1, inputmode: "numeric" } },
+      { name: "other_day", label: "عدد مباريات باقي الأيام", type: "number", value: 4, attrs: { min: 1, inputmode: "numeric" } },
+      { name: "skip_fri", label: "تخطّي أيام الجمعة", type: "select", value: "no",
+        options: [{ value: "no", label: "لا — أيام متتالية" }, { value: "yes", label: "نعم — تخطَّ الجمعة" }] },
+    ],
+    onSubmit: async (v, close) => {
+      if (!v.start_date) return toast("اختر تاريخ أوّل يوم", "err");
+      const primaryPerDay = toInt(v.first_day, 3);
+      const otherDay = toInt(v.other_day, 4);
+      const secondaryPerDay = Math.max(0, otherDay - primaryPerDay);
+      const opts = {
+        startDate: v.start_date,
+        startTime: v.start_time || "18:30",
+        gapMin: toInt(v.gap, 30),
+        primaryPerDay,
+        secondaryPerDay,
+        secondaryStartDayIdx: 1,                       // اليوم الأوّل بلا مباريات تناوبيّة
+        secondaryOrder: secGroups.map((g) => g.id),
+        skipFridays: v.skip_fri === "yes",
+      };
+      const plan = api.planLeagueSchedule(groups, teams, matches, opts);
+      if (!plan.length) return toast("تعذّر توليد الجدول — تحقّق من الفرق والبيوت", "err");
+      close();
+      previewAndApplySchedule(state, plan, { primaryLabel: priGroups.map((g) => g.name).join("، "), rot });
+    },
+  });
+}
+
+function previewAndApplySchedule(state, plan, info) {
+  const tName = new Map(state.teams.map((x) => [x.id, x.name]));
+  const gName = new Map(state.groups.map((x) => [x.id, x.name]));
+  const byDate = new Map();
+  for (const p of plan) { if (!byDate.has(p.match_date)) byDate.set(p.match_date, []); byDate.get(p.match_date).push(p); }
+  const dates = [...byDate.keys()].sort();
+
+  const preview = el("div", { style: "max-height:46vh;overflow:auto;text-align:start" });
+  dates.forEach((d, i) => {
+    preview.appendChild(el("div.day-head", {}, [
+      el("span", { text: `يوم ${i + 1} · ${weekdayName(d)}` }),
+      el("span.date", { text: formatDate(d) }),
+      el("span.line"),
+    ]));
+    for (const p of byDate.get(d)) {
+      preview.appendChild(el("div", { style: "display:flex;gap:10px;align-items:center;padding:3px 4px;font-size:13px" }, [
+        el("b", { style: "min-width:46px", text: formatTime(p.match_time) }),
+        el("span", { style: "opacity:.65;min-width:104px", text: gName.get(p.group_id) || "" }),
+        el("span", { text: `${tName.get(p.home_team_id) || "?"} × ${tName.get(p.away_team_id) || "?"}` }),
+      ]));
+    }
+  });
+
+  let close;
+  const applyBtn = el("button.btn.btn-primary", { type: "button", text: "تطبيق الجدول" });
+  applyBtn.addEventListener("click", async () => {
+    applyBtn.disabled = true; applyBtn.textContent = "جارٍ الحفظ…";
+    try {
+      const n = await api.scheduleMatches(plan.map((p) => ({ id: p.id, match_date: p.match_date, match_time: p.match_time })));
+      close(); toast(`تمّت جدولة ${n} مباراة ✓`, "ok"); route();
+    } catch (e) {
+      applyBtn.disabled = false; applyBtn.textContent = "تطبيق الجدول";
+      toast(e.message || t.errorGeneric, "err");
+    }
+  });
+
+  close = openModal({
+    title: `🗓 معاينة الجدول — ${plan.length} مباراة / ${dates.length} يوم`,
+    body: el("div", {}, [
+      el("p.page-sub", { style: "margin-bottom:6px", text: `من ${formatDate(dates[0])} إلى ${formatDate(dates[dates.length - 1])}. سيُستبدل أي موعد سابق للمباريات المشمولة.` }),
+      el("p.page-sub", { style: "margin-bottom:10px;opacity:.7", text: `الأساسية: ${info.primaryLabel || "—"} · التناوب: ${info.rot}` }),
+      preview,
+    ]),
+    footer: [applyBtn, el("button.btn.btn-outline", { type: "button", text: "إلغاء", onclick: () => close() })],
+  });
 }
 
 // ---- الإدارة المباشرة للمباراة ---------------------------------------------

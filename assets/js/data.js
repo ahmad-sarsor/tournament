@@ -1095,6 +1095,117 @@ export function buildFixtures(tournamentId, groups, teams) {
   return rows;
 }
 
+// ---- جدولة تلقائية للدوري ---------------------------------------------------
+// توزّع التواريخ والأوقات على مباريات موجودة وفق نمط يومي:
+//   • البيوت «الأساسية» تملأ أوّل مباريات كل يوم (primaryPerDay).
+//   • البيوت «التناوبية» (secondaryOrder) تملأ الخانات الأخيرة بالتناوب (secondaryPerDay)،
+//     وتبدأ من اليوم رقم secondaryStartDayIdx (لذلك يكون اليوم الأول أقلّ مباريات).
+// ضمانات: لا يلعب فريق مباراتين في اليوم نفسه، وكل مباراة تُجدول مرّة واحدة فقط.
+// دالّة خالصة (بلا شبكة) — تُعيد [{ id, group_id, home_team_id, away_team_id, match_date, match_time }].
+export function planLeagueSchedule(groups, teams, matches, opts) {
+  const pairKey = (a, b) => [a, b].sort().join("~");
+  const secondaryIds = (opts.secondaryOrder || []).filter((id) => groups.some((g) => g.id === id));
+  const gById = (id) => groups.find((g) => g.id === id);
+  const primaryIds = groups.map((g) => g.id).filter((id) => !secondaryIds.includes(id))
+    .sort((a, b) => (gById(a)?.sort_order || 0) - (gById(b)?.sort_order || 0));
+  const houseQueue = (gid) => {
+    const tIds = teams.filter((x) => x.group_id === gid)
+      .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.id < b.id ? -1 : 1)).map((x) => x.id);
+    const byPair = new Map();
+    matches.filter((m) => m.group_id === gid).forEach((m) => byPair.set(pairKey(m.home_team_id, m.away_team_id), m));
+    const q = [], seen = new Set();
+    for (const rd of roundRobinPairs(tIds)) for (const [a, b] of rd) {
+      const m = byPair.get(pairKey(a, b));
+      if (m && !seen.has(m.id)) { q.push(m); seen.add(m.id); }
+    }
+    // احتياط: أضِف أي مباراة في هذا البيت لم يغطِّها الدوري المولّد (فرق فرديّة، ترتيب غير متوقّع)
+    matches.filter((m) => m.group_id === gid && !seen.has(m.id)).forEach((m) => q.push(m));
+    return q;
+  };
+  const Q = {};
+  [...primaryIds, ...secondaryIds].forEach((id) => { Q[id] = houseQueue(id); });
+  const rem = (id) => Q[id].length;
+  const primaryPerDay = Math.max(1, opts.primaryPerDay || 1);
+  const secondaryPerDay = Math.max(0, opts.secondaryPerDay || 0);
+  const secStartDay = opts.secondaryStartDayIdx ?? 1;
+
+  const days = [];
+  let secCursor = 0, guard = 0;
+  while (primaryIds.some(rem) || secondaryIds.some(rem)) {
+    if (++guard > 1000) break;                       // صمّام أمان ضد أي حلقة لا نهائية
+    const dayIdx = days.length;
+    const day = { primary: [], secondary: [] };
+    const used = new Set();                           // فرق لعبت هذا اليوم
+    // مباريات البيوت الأساسية — نفضّل بيتاً لم يُستعمل اليوم والأكثر مباريات متبقّية
+    while (day.primary.length < primaryPerDay) {
+      const usedHouses = new Set(day.primary.map((m) => m.group_id));
+      const ok = (id) => { const m = Q[id][0]; return m && !used.has(m.home_team_id) && !used.has(m.away_team_id); };
+      let cands = primaryIds.filter((id) => rem(id) && !usedHouses.has(id) && ok(id));
+      if (!cands.length) cands = primaryIds.filter((id) => rem(id) && ok(id));   // اضطراراً: بيت مكرّر بلا تعارض فرق
+      if (!cands.length) break;
+      cands.sort((a, b) => rem(b) - rem(a) || (gById(a).sort_order - gById(b).sort_order));
+      const m = Q[cands[0]].shift();
+      day.primary.push(m); used.add(m.home_team_id); used.add(m.away_team_id);
+    }
+    // المباراة/المباريات التناوبية — تدور على البيوت التناوبية بالترتيب
+    if (dayIdx >= secStartDay) {
+      let s = 0;
+      while (s < secondaryPerDay && secondaryIds.some(rem)) {
+        let tries = 0, got = null;
+        while (tries < secondaryIds.length) {
+          const gid = secondaryIds[secCursor % secondaryIds.length]; secCursor++;
+          if (rem(gid)) { got = Q[gid].shift(); break; }
+          tries++;
+        }
+        if (!got) break;
+        day.secondary.push(got); s++;
+      }
+    }
+    if (!day.primary.length && !day.secondary.length) break;
+    days.push(day);
+  }
+
+  // إسناد التواريخ والأوقات (مع خيار تخطّي أيام الجمعة)
+  const out = [];
+  const [sy, sm, sd] = String(opts.startDate).split("-").map(Number);
+  const cur = new Date(sy, (sm || 1) - 1, sd || 1);
+  const [sh, smin] = String(opts.startTime || "18:30").split(":").map(Number);
+  const gap = Math.max(1, opts.gapMin || 30);
+  const pad = (n) => String(n).padStart(2, "0");
+  const fmtD = (dt) => `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  for (const day of days) {
+    if (opts.skipFridays) while (cur.getDay() === 5) cur.setDate(cur.getDate() + 1);
+    [...day.primary, ...day.secondary].forEach((m, i) => {
+      const tot = (smin || 0) + i * gap;
+      out.push({
+        id: m.id, group_id: m.group_id, home_team_id: m.home_team_id, away_team_id: m.away_team_id,
+        match_date: fmtD(cur), match_time: `${pad((sh || 0) + Math.floor(tot / 60))}:${pad(tot % 60)}`,
+      });
+    });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+// حفظ دفعة من المواعيد على مباريات موجودة (للجدولة التلقائية) — مع إعادة حساب موعد قفل التوقّع
+export async function scheduleMatches(rows) {
+  if (!rows.length) return 0;
+  const d = requireDb();
+  let done = 0;
+  for (let i = 0; i < rows.length; i += 450) {
+    const b = writeBatch(d);
+    for (const r of rows.slice(i, i + 450)) {
+      b.update(doc(d, "matches", r.id), {
+        match_date: r.match_date, match_time: r.match_time,
+        locks_at: matchLockMillis(r.match_date, r.match_time),
+      });
+    }
+    await b.commit();
+    done += Math.min(450, rows.length - i);
+  }
+  return done;
+}
+
 // ---- تعبئة بطولة تجريبية (بيانات الإكسل) -----------------------------------
 
 export async function seedSampleTournament() {
