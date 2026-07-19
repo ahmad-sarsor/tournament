@@ -1753,6 +1753,8 @@ function renderMatchesTab(host, state) {
     el("button.btn.btn-primary", { text: "＋ " + t.addMatch, onclick: () => matchForm(state, null) }),
     el("button.btn.btn-accent", { text: "⚡ " + t.generateFixtures, onclick: () => generateFixtures(state) }),
     matches.length ? el("button.btn.btn-outline", { text: "🗓 جدولة تلقائية", onclick: () => autoScheduleForm(state) }) : null,
+    matches.some((m) => (m.status || "scheduled") === "scheduled")
+      ? el("button.btn.btn-outline", { text: "🗑 حذف كل المباريات المجدولة", onclick: () => removeAllScheduled(state) }) : null,
   ]);
 
   const list = el("div");
@@ -1853,6 +1855,20 @@ async function removeMatch(m) {
   if (!(await confirmDialog(`حذف هذه المباراة؟ ${t.confirmDelete}`))) return;
   try { await api.deleteMatch(m.id); toast(t.deleted, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+async function removeAllScheduled(state) {
+  const { tournament, matches } = state;
+  const n = matches.filter((m) => (m.status || "scheduled") === "scheduled").length;
+  if (!n) return toast("لا توجد مباريات مجدولة للحذف", "");
+  const played = matches.length - n;
+  const note = played ? `\n(المباريات المباشرة/المنتهية وعددها ${played} لن تُحذف.)` : "";
+  if (!(await confirmDialog(`حذف كل المباريات المجدولة (${n})؟ لا يمكن التراجع.${note}`,
+    { danger: true, confirmText: "حذف الكل" }))) return;
+  try {
+    const done = await api.deleteScheduledMatches(tournament.id);
+    toast(`حُذفت ${done} مباراة ✓`, "ok"); route();
+  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
 function resultModal(m) {

@@ -1259,6 +1259,26 @@ export async function scheduleMatches(rows) {
   return done;
 }
 
+// حذف كل المباريات «المجدولة» (status === 'scheduled') لبطولة — مع أحداثها.
+// لا يمسّ المباريات المباشرة أو المنتهية (لحماية النتائج المُدخلة). يعيد عدد المحذوف.
+export async function deleteScheduledMatches(tid) {
+  const d = requireDb();
+  const snap = await getDocs(query(collection(d, "matches"), where("tournament_id", "==", tid)));
+  const ids = mapDocs(snap).filter((m) => (m.status || "scheduled") === "scheduled").map((m) => m.id);
+  if (!ids.length) return 0;
+  const idSet = new Set(ids);
+  // أحداث هذه المباريات (نجلب أحداث البطولة ونصفّي بلا فهرس مركّب)
+  const evSnap = await getDocs(query(collection(d, "events"), where("tournament_id", "==", tid)));
+  const evIds = mapDocs(evSnap).filter((e) => idSet.has(e.match_id)).map((e) => e.id);
+  const targets = [...evIds.map((id) => ["events", id]), ...ids.map((id) => ["matches", id])];
+  for (let i = 0; i < targets.length; i += 450) {
+    const b = writeBatch(d);
+    for (const [coll, id] of targets.slice(i, i + 450)) b.delete(doc(d, coll, id));
+    await b.commit();
+  }
+  return ids.length;
+}
+
 // ---- تعبئة بطولة تجريبية (بيانات الإكسل) -----------------------------------
 
 export async function seedSampleTournament() {
