@@ -1743,6 +1743,93 @@ async function removePlayer(state, team, p) {
 
 // ---- تبويب المباريات -------------------------------------------------------
 
+// ---- جدول «رباط الأخوة» المعتمَد (إدخال دفعة واحدة بدل اليدوي) — أداة لمرّة واحدة ----
+const RABAT_TID = "V73Zm4GlkLOQOQ3QMvfJ";
+// [معرّف المباراة، التاريخ، الوقت، ترتيب] — ٦١ مباراة: يوم١ ٣ مباريات (٢ إعدادي+ثانوي)، الأيام ٢-١٥ أربع، يوم١٦ اثنتان
+const RABAT_PLAN = [
+  ["6wen8f95QYfRE6tzdLj9","2026-07-26","18:30",100],
+  ["HizPZsSUvbAcbkaqWT9j","2026-07-26","19:00",101],
+  ["SBMvUGZltvTUNY2nFacG","2026-07-26","19:30",102],
+  ["nOrSygM1vCBzd8HQIgwg","2026-07-27","18:30",200],
+  ["2N53zRiVqX1BAJ8jJG9y","2026-07-27","19:00",201],
+  ["3KjAUUpCTyw177b7YYiZ","2026-07-27","19:30",202],
+  ["mamQlX8aTFZpEHrbcqIJ","2026-07-27","20:00",203],
+  ["Mfc9HrlQ0RuANsopYjVZ","2026-07-28","18:30",300],
+  ["vH4a5Z9wzihOP5Op4iNM","2026-07-28","19:00",301],
+  ["Rrm7xrzBqpDB9SDYvaci","2026-07-28","19:30",302],
+  ["qsUapaYqyVLWvvGwn3Y7","2026-07-28","20:00",303],
+  ["DHPH9aMqpti0AUXksHvQ","2026-07-29","18:30",400],
+  ["bF4WnMUu6GZfvNUgesjn","2026-07-29","19:00",401],
+  ["6cEPVUKHPVtypNp6CFNT","2026-07-29","19:30",402],
+  ["otJ8aHNNlKalSGDmuFkA","2026-07-29","20:00",403],
+  ["SlQJocVMG8k6vt3OIzIa","2026-07-30","18:30",500],
+  ["9k3AOsTbJEDvAYVHawHE","2026-07-30","19:00",501],
+  ["kBEKykhikzcYl8p8d0oO","2026-07-30","19:30",502],
+  ["te5s5aK69TUJxiBSreoR","2026-07-30","20:00",503],
+  ["VDReAJmS88j0TRZVRigG","2026-07-31","18:30",600],
+  ["lFr2S0ccdG1qUqwIB4wS","2026-07-31","19:00",601],
+  ["0f9qArJ9bLtCtEeTwIor","2026-07-31","19:30",602],
+  ["wEcdPFaYTcb4HyMaoAuS","2026-07-31","20:00",603],
+  ["XzcPhbQ7vvc3RCXclvtQ","2026-08-01","18:30",700],
+  ["mYhz0zYuWcprpGeASI3k","2026-08-01","19:00",701],
+  ["LWImwAJ5FARbB76TTea9","2026-08-01","19:30",702],
+  ["KIOs9f76WA0OfyC2KmBt","2026-08-01","20:00",703],
+  ["QYoad3Is11jD6Ehl44hL","2026-08-02","18:30",800],
+  ["H7dLY4WwzA70Tud5yl7a","2026-08-02","19:00",801],
+  ["KszNVl7lmdmfqSacRII6","2026-08-02","19:30",802],
+  ["FtYujkTz7K90fmG97Med","2026-08-02","20:00",803],
+  ["iuI01sFiAepBwvDiu4h7","2026-08-03","18:30",900],
+  ["hRqusghYMhtSLxApnMN8","2026-08-03","19:00",901],
+  ["tcZUweuekJx0OafzYNJZ","2026-08-03","19:30",902],
+  ["DZh0aMJHjYy6B56mEZeX","2026-08-03","20:00",903],
+  ["04wvQRBjisxSP64IAwy1","2026-08-04","18:30",1000],
+  ["9J9dLw9LeNPvEP7ngtTP","2026-08-04","19:00",1001],
+  ["qXSFIuQ5JrcvRhuSKJB4","2026-08-04","19:30",1002],
+  ["jVfiF4UQkiJnRoRRAAvn","2026-08-04","20:00",1003],
+  ["2X2vhXxLrRLpq4Nhqkbj","2026-08-05","18:30",1100],
+  ["7TVzkYFu8HheyhkghKaH","2026-08-05","19:00",1101],
+  ["Fbs0x1HESnuW8F0gI9Nb","2026-08-05","19:30",1102],
+  ["AFJGidzdsFyRo6CN52hP","2026-08-05","20:00",1103],
+  ["BZTWdoQNgiCb3YAbzCZa","2026-08-06","18:30",1200],
+  ["XMYVapMRKJzOp4TajZlG","2026-08-06","19:00",1201],
+  ["YgZ3XqKfEnMFIpB2gljs","2026-08-06","19:30",1202],
+  ["vD6ZX4ar3ZLIygz9q9wu","2026-08-06","20:00",1203],
+  ["Loq36RQpDfqY5ZYfj3hj","2026-08-07","18:30",1300],
+  ["kFhLnFvSss7cFh1T7OSa","2026-08-07","19:00",1301],
+  ["3iN4K0UCXvCbbf90x9eF","2026-08-07","19:30",1302],
+  ["dPma2lS3woDwS0A01HDU","2026-08-07","20:00",1303],
+  ["xw250IjK4V23qOFwhrxA","2026-08-08","18:30",1400],
+  ["W0urb2L9TKIKXITLasS5","2026-08-08","19:00",1401],
+  ["PQRgIwzIK3lAvUAFNY6h","2026-08-08","19:30",1402],
+  ["vhuBzgwUfTkwaXZSpQev","2026-08-08","20:00",1403],
+  ["yceTkvNUDTV0IckpJKU1","2026-08-09","18:30",1500],
+  ["uAre9R31WCMHlOdm9rdO","2026-08-09","19:00",1501],
+  ["ypeNlzJM9OUELxX9zb9R","2026-08-09","19:30",1502],
+  ["aKepreJDmtNt4RRJENes","2026-08-09","20:00",1503],
+  ["4TRBnQ5yNiGX2ITDY0E2","2026-08-10","18:30",1600],
+  ["IDgd1wlKvhKuMnY85JOB","2026-08-10","19:00",1601],
+];
+
+// يضبط تاريخ/وقت/ترتيب الـ٦١ مباراة دفعةً واحدة (يعيد updateMatch حساب locks_at تلقائياً)
+async function applyRabatSchedule(state) {
+  if (state.tournament.id !== RABAT_TID) return;
+  const first = RABAT_PLAN[0], last = RABAT_PLAN[RABAT_PLAN.length - 1];
+  if (!(await confirmDialog(`ضبط مواعيد ${RABAT_PLAN.length} مباراة على الجدول المعتمَد (${first[1]} ← ${last[1]})؟`,
+    { danger: false, confirmText: "تطبيق" }))) return;
+  const ids = new Set((state.matches || []).map((m) => m.id));
+  let ok = 0, missing = 0, failed = 0;
+  for (let i = 0; i < RABAT_PLAN.length; i++) {
+    const [id, date, time, sort] = RABAT_PLAN[i];
+    if (!ids.has(id)) { missing++; continue; }
+    try { await api.updateMatch(id, { match_date: date, match_time: time, sort_order: sort }); ok++; }
+    catch (e) { console.error("applyRabatSchedule", id, e); failed++; }
+    if (i % 12 === 11) toast(`… ${i + 1}/${RABAT_PLAN.length}`, "");
+  }
+  toast(`تم ضبط ${ok} مباراة` + (missing ? ` · ${missing} غير موجودة` : "") + (failed ? ` · ${failed} فشلت` : ""),
+    failed ? "err" : "ok");
+  route();
+}
+
 function renderMatchesTab(host, state) {
   const { tournament, groups, teams, matches, scorerOnly } = state;
   const teamById = new Map(teams.map((x) => [x.id, x]));
@@ -1752,6 +1839,7 @@ function renderMatchesTab(host, state) {
   const bar = scorerOnly ? null : el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
     el("button.btn.btn-primary", { text: "＋ " + t.addMatch, onclick: () => matchForm(state, null) }),
     el("button.btn.btn-accent", { text: "⚡ " + t.generateFixtures, onclick: () => generateFixtures(state) }),
+    tournament.id === RABAT_TID ? el("button.btn.btn-outline", { text: "🗓️ تطبيق الجدول", onclick: () => applyRabatSchedule(state) }) : null,
   ]);
 
   const list = el("div");
