@@ -518,6 +518,8 @@ async function renderHome() {
     el("div", { style: "display:flex;gap:8px;flex-wrap:wrap" }, [
       isOwnerUser ? el("a.btn.btn-outline", { href: "#/users", text: "👥 " + t.usersAdmin }) : null,
       isPlatformAdminUser ? el("a.btn.btn-outline", { href: "#/suggestions", text: "💡 " + t.suggestions }) : null,
+      isOwnerUser ? el("a.btn.btn-outline", { href: "./backup-export.html", target: "_blank",
+        title: "تنزيل كل البيانات (Excel/JSON)", text: "🗄 نسخة احتياطية" }) : null,
       isMemberUser ? el("button.btn.btn-primary", { text: "＋ " + t.newTournament, onclick: () => tournamentForm(null) }) : null,
     ]),
   ]);
