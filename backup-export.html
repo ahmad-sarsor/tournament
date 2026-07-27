@@ -44,7 +44,7 @@
     <div class="counts" id="counts"></div>
     <div class="status" id="status">اضغط أحد الزرّين لبدء التنزيل. لا حاجة لتسجيل دخول — كل بيانات البطولات عامّة القراءة.</div>
     <div class="note">
-      ℹ️ <b>أرقام هواتف/أعمار المشاركين في مسابقة التوقّعات</b> خاصّة ولا تُقرأ إلا للمنظّم المسجَّل — صدّرها من لوحة المنظّم على الموقع المباشر عبر «👥 المشاركون ← ⬇ تصدير CSV». هذه الأداة تصدّر كل شيء آخر (بما فيها أسماء المتوقّعين ونقاطهم).
+      ℹ️ بيانات البطولات (المباريات/الفرق/اللاعبون/الأحداث) عامّة القراءة وتُصدَّر كاملة. مجموعات الحسابات والصلاحيات تظهر فقط إن فتحت الأداة بحساب المالك على الموقع المباشر.
     </div>
   </div>
 </div>
@@ -95,13 +95,13 @@ async function fetchAll() {
   }
   var res = await Promise.all([
     all("tournaments"), all("groups"), all("teams"), all("matches"),
-    all("players"), all("events"), all("pcomps"), all("predictors"), all("predictions"),
+    all("players"), all("events"),
     allSafe("users"), allSafe("admins"), allSafe("members"), allSafe("suggestions"), allSafe("usernames"),
   ]);
   dataCache = {
     tournaments: res[0], groups: res[1], teams: res[2], matches: res[3],
-    players: res[4], events: res[5], pcomps: res[6], predictors: res[7], predictions: res[8],
-    users: res[9], admins: res[10], members: res[11], suggestions: res[12], usernames: res[13],
+    players: res[4], events: res[5],
+    users: res[6], admins: res[7], members: res[8], suggestions: res[9], usernames: res[10],
   };
   return dataCache;
 }
@@ -110,7 +110,6 @@ function showCounts(d) {
   var counts = [
     ["البطولات", d.tournaments.length], ["المباريات", d.matches.length], ["الفرق", d.teams.length],
     ["اللاعبون", d.players.length], ["الأحداث", d.events.length],
-    ["المسابقات", d.pcomps.length], ["المتوقّعون", d.predictors.length], ["التوقّعات", d.predictions.length],
     ["المستخدمون", d.users.length], ["الاقتراحات", d.suggestions.length],
   ];
   countsEl.innerHTML = counts.map(function(c){ return '<span class="chip">'+c[0]+": "+c[1]+'</span>'; }).join("");
@@ -124,7 +123,6 @@ function exportJson(d) {
     counts: {
       tournaments: d.tournaments.length, groups: d.groups.length, teams: d.teams.length,
       matches: d.matches.length, players: d.players.length, events: d.events.length,
-      pcomps: d.pcomps.length, predictors: d.predictors.length, predictions: d.predictions.length,
       users: d.users.length, admins: d.admins.length, members: d.members.length,
       suggestions: d.suggestions.length, usernames: d.usernames.length,
     },
@@ -138,15 +136,14 @@ function exportJson(d) {
 function exportExcel(d) {
   if (typeof XLSX === "undefined") throw new Error("تعذّر تحميل مكتبة Excel — تأكّد من اتصال الإنترنت ثم أعد المحاولة.");
   var tournaments=d.tournaments, groups=d.groups, teams=d.teams, matches=d.matches,
-      players=d.players, events=d.events, pcomps=d.pcomps, predictors=d.predictors, predictions=d.predictions;
+      players=d.players, events=d.events;
 
-  var tById={}, gById={}, tmById={}, plById={}, mById={}, cById={};
+  var tById={}, gById={}, tmById={}, plById={}, mById={};
   tournaments.forEach(function(x){ tById[x.id]=x; });
   groups.forEach(function(x){ gById[x.id]=x; });
   teams.forEach(function(x){ tmById[x.id]=x; });
   players.forEach(function(x){ plById[x.id]=x; });
   matches.forEach(function(x){ mById[x.id]=x; });
-  pcomps.forEach(function(x){ cById[x.id]=x; });
   var tName=function(id){ return (tById[id]||{}).name||""; };
   var gName=function(id){ return (gById[id]||{}).name||""; };
   var teamName=function(id){ return (tmById[id]||{}).name||""; };
@@ -234,7 +231,7 @@ function exportExcel(d) {
   });
   addSheet("الترتيب", standRows);
 
-  var evAr = { goal:"هدف", yellow:"إنذار", red:"طرد" };
+  var evAr = { goal:"هدف", own_goal:"هدف عكسي", yellow:"إنذار", red:"طرد" };
   var evsorted = events.slice().sort(function(a,b){ return (a.created_at||0)-(b.created_at||0); });
   addSheet("الأحداث", [["البطولة","المباراة","الفريق","اللاعب","النوع","الدقيقة"]].concat(
     evsorted.map(function(e){
@@ -242,51 +239,6 @@ function exportExcel(d) {
       return [ tName(e.tournament_id), teamName(m.home_team_id)+" × "+teamName(m.away_team_id), teamName(e.team_id), plName(e.player_id), evAr[e.type]||e.type, e.minute!=null?e.minute:"" ];
     })
   ));
-
-  if (pcomps.length) {
-    var stAr = { draft:"مسودّة", open:"مفتوحة", closed:"مغلقة للتسجيل", finished:"منتهية" };
-    addSheet("مسابقات التوقّعات", [["البطولة","العنوان","الحالة","نقاط النتيجة","نقاط الفارق","نقاط الفائز","عدد الفائزين","الجوائز"]].concat(
-      pcomps.map(function(c){ return [ tName(c.tournament_id), c.title||"", stAr[c.status]||c.status||"", c.pts_exact!=null?c.pts_exact:"", c.pts_diff!=null?c.pts_diff:"", c.pts_outcome!=null?c.pts_outcome:"", c.winners_count!=null?c.winners_count:"", (Array.isArray(c.prizes)?c.prizes.join(" | "):"") ]; })
-    ));
-  }
-
-  function cfgOf(c){ return { exact:(c&&c.pts_exact)!=null?c.pts_exact:5, diff:(c&&c.pts_diff)!=null?c.pts_diff:3, outcome:(c&&c.pts_outcome)!=null?c.pts_outcome:2 }; }
-  function predPts(pred, m, cfg){
-    if (!(m && m.status==="finished" && m.home_score!=null && m.away_score!=null)) return null;
-    if (pred.home==null || pred.away==null) return 0;
-    var ah=m.home_score, aa=m.away_score, ph=pred.home, pa=pred.away;
-    if (ph===ah && pa===aa) return cfg.exact;
-    if (sign(ah-aa)!==sign(ph-pa)) return 0;
-    if (ah-aa===ph-pa) return cfg.diff;
-    return cfg.outcome;
-  }
-  if (predictors.length) {
-    var predByKey = {};
-    predictions.forEach(function(p){ var k=p.competition_id+"|"+p.uid; (predByKey[k]=predByKey[k]||[]).push(p); });
-    var prRows = [["المسابقة","البطولة","المتوقّع","النقاط","نتائج مضبوطة","توقّعات"]];
-    predictors.forEach(function(pr){
-      var c=cById[pr.competition_id], cfg=cfgOf(c);
-      var mine=predByKey[pr.competition_id+"|"+pr.uid]||[], pts=0, exact=0;
-      mine.forEach(function(p){
-        var m=mById[p.match_id], v=predPts(p,m,cfg);
-        if (v!=null) pts+=v;
-        if (m && m.home_score===p.home && m.away_score===p.away) exact++;
-      });
-      prRows.push([ (c&&c.title)||"", tName(pr.tournament_id), pr.name||"", pts, exact, mine.length ]);
-    });
-    prRows = [prRows[0]].concat(prRows.slice(1).sort(function(a,b){ return b[3]-a[3] || b[4]-a[4]; }));
-    addSheet("المتوقّعون", prRows);
-
-    var uidName = {};
-    predictors.forEach(function(pr){ uidName[pr.competition_id+"|"+pr.uid]=pr.name||""; });
-    addSheet("التوقّعات", [["المسابقة","المتوقّع","المباراة","توقّعه","النتيجة الفعليّة","نقاطه"]].concat(
-      predictions.map(function(p){
-        var c=cById[p.competition_id], m=mById[p.match_id]||{}, v=predPts(p,m,cfgOf(c));
-        var actual=(m.home_score!=null && m.away_score!=null)?(m.home_score+" : "+m.away_score):"—";
-        return [ (c&&c.title)||"", uidName[p.competition_id+"|"+p.uid]||"", teamName(m.home_team_id)+" × "+teamName(m.away_team_id), (p.home+" : "+p.away), actual, v==null?"—":v ];
-      })
-    ));
-  }
 
   // ---- الحسابات والصلاحيات (تظهر للمالك المسجَّل؛ تبقى فارغة لغيره) ----
   var users=d.users||[], admins=d.admins||[], members=d.members||[], suggestions=d.suggestions||[], usernames=d.usernames||[];

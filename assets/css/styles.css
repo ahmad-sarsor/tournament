@@ -17,9 +17,6 @@
   --sun-ink:      #8a5500;
   --sun-soft:     #fff4dd;
   --gold:         var(--sun);   /* اسم بديل مستخدَم في الكود */
-  --pc:           #8b5cf6;   /* مسابقة التوقّعات */
-  --pc-2:         #d946ef;
-  --pc-ink:       #ffffff;
 
   /* ألوان النتائج (مشبعة) */
   --win:          #17b45a;
@@ -73,7 +70,6 @@
   :root:not([data-theme="light"]) {
     --brand:#4d82ff; --brand-strong:#2f6bff; --brand-deep:#16337d; --brand-soft:#142446; --brand-softer:#1a2f5c;
     --sun:#ffc046; --sun-ink:#ffd98a; --sun-soft:#2c2410;
-    --pc:#9d74ff; --pc-2:#e368f5;
     --win:#2ecc71; --win-soft:#0f2b1c; --loss:#ff5a64; --loss-soft:#331418; --live:#ff5a64;
     --bg:#0a1120; --surface:#121c33; --surface-2:#182441; --surface-3:#20304f; --border:#26355a; --border-2:#354769;
     --ink:#ecf2ff; --text:#dce5f7; --text-2:#9aa9c6; --text-3:#8fa0c0;
@@ -84,7 +80,6 @@
 :root[data-theme="dark"] {
   --brand:#4d82ff; --brand-strong:#2f6bff; --brand-deep:#16337d; --brand-soft:#142446; --brand-softer:#1a2f5c;
   --sun:#ffc046; --sun-ink:#ffd98a; --sun-soft:#2c2410;
-  --pc:#9d74ff; --pc-2:#e368f5;
   --win:#2ecc71; --win-soft:#0f2b1c; --loss:#ff5a64; --loss-soft:#331418; --live:#ff5a64;
   --bg:#0a1120; --surface:#121c33; --surface-2:#182441; --surface-3:#20304f; --border:#26355a; --border-2:#354769;
   --ink:#ecf2ff; --text:#dce5f7; --text-2:#9aa9c6; --text-3:#8fa0c0;
@@ -477,6 +472,11 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .lc-btn { min-height: 52px; font-size: 1.02rem; font-weight: 700; }
 .lc-goal { background: var(--brand); color: #fff; border-color: transparent; }
 .lc-goal:hover { background: var(--brand-strong); }
+/* هدف عكسي — زر أهدأ من زر الهدف كي لا يُضغط بالخطأ */
+.lc-own-goal { background: var(--surface-2); color: var(--text-2); border: 1px dashed var(--border-2); min-height: 44px; font-size: .9rem; }
+.lc-own-goal:hover { color: var(--ink); border-color: var(--brand); }
+/* وسم «(عكسي)» بجانب اسم اللاعب في الخط الزمني (عام + إدارة) */
+.ev-og { font-size: .72rem; color: var(--text-3); font-weight: 700; white-space: nowrap; }
 .lc-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .lc-cards .lc-btn { min-height: 46px; font-size: 1.2rem; }
 .lc-yellow { background: #fde68a; border-color: #fcd34d; }
@@ -496,13 +496,53 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
 .stat-tile { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 12px; text-align: center; box-shadow: var(--shadow-xs); min-width: 0; }
 .stat-val { font-size: 1.5rem; font-weight: 800; color: var(--brand); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* اسم أفضل هدّاف: يلتفّ لسطرين بخطّ أصغر بدل القصّ بثلاث نقاط */
+.stat-val.is-name { font-size: .95rem; white-space: normal; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: clip; }
 .stat-lbl { font-size: .72rem; color: var(--text-3); font-weight: 600; margin-top: 4px; }
 .stats-section { margin-bottom: 24px; }
 .stats-section .mp-title { display: flex; align-items: center; gap: 2px; }
-.stat-team { color: var(--text-2); font-weight: 600; font-size: .86rem; overflow-wrap: anywhere; }
+.stats-subnote { font-size: .74rem; color: var(--text-3); font-weight: 600; margin: -6px 2px 10px; }
 @media (max-width: 560px) {
   .stat-tiles { grid-template-columns: 1fr 1fr; }
   .stat-val { font-size: 1.3rem; }
+  .stat-val.is-name { font-size: .88rem; }
+}
+
+/* قوائم الإحصائيات (هدّافون/بطاقات): موبايل أولاً — لا تمرير أفقياً إطلاقاً */
+.stat-list { display: flex; flex-direction: column; overflow: hidden; }
+.sl-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--border); min-width: 0; }
+.sl-row:last-child { border-bottom: 0; }
+.sl-rank {
+  flex: 0 0 auto; min-width: 28px; height: 28px; display: grid; place-items: center;
+  border-radius: 9px; background: var(--surface-2); color: var(--text-3);
+  font-weight: 800; font-size: .78rem; font-variant-numeric: tabular-nums; font-family: var(--font-display);
+}
+.sl-main { flex: 1; min-width: 0; }
+.sl-name { font-weight: 800; color: var(--ink); font-size: .9rem; line-height: 1.3; overflow-wrap: anywhere; }
+.sl-team { display: block; font-size: .73rem; color: var(--text-3); font-weight: 600; margin-top: 1px; overflow-wrap: anywhere; }
+a.sl-team:hover { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
+.sl-val {
+  flex: 0 0 auto; min-width: 38px; text-align: center; font-weight: 900; font-size: .95rem;
+  color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 4px 11px;
+  font-variant-numeric: tabular-nums; font-family: var(--font-display);
+}
+.sl-chip {
+  flex: 0 0 auto; min-width: 46px; text-align: center; font-weight: 800; font-size: .78rem;
+  background: var(--surface-2); border-radius: 999px; padding: 4px 8px;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.sl-chip.is-zero { opacity: .35; }
+/* المتصدّر: خلفية ذهبية خفيفة ووسام أكبر */
+.sl-row.sl-top { background: color-mix(in srgb, var(--gold) 8%, transparent); }
+.sl-row.sl-top .sl-rank { background: transparent; font-size: 1.05rem; }
+.sl-row.sl-top .sl-val { background: color-mix(in srgb, var(--gold) 24%, transparent); color: var(--sun-ink); }
+
+/* جدول إحصائيات الفرق: مضغوط يتّسع لعرض 320px بلا تمرير */
+table.team-stats thead th, table.team-stats tbody td { padding-inline: 3px; }
+table.team-stats .team-name { font-size: .84rem; }
+@media (max-width: 400px) {
+  table.team-stats tbody td { font-size: .8rem; padding-inline: 2px; }
+  table.team-stats .team-name { font-size: .78rem; }
 }
 
 /* ===== الفرق + التشكيلة (عرض عام) ======================================= */
@@ -687,159 +727,15 @@ select.filter-select { width: auto; min-width: 150px; max-width: 100%; padding: 
 .bk-edit-btn:hover { color: var(--brand); border-color: var(--brand); }
 
 /* ============================================================================
-   مسابقة التوقّعات — هوية بصريّة بنفسجيّة مميّزة، عصريّة ومضغوطة
-   ============================================================================ */
-.pc-accent { --a: var(--pc); --a2: var(--pc-2); }
-
-/* لافتة الدعوة البارزة على صفحة البطولة (كي لا تبدو المسابقة «مختبئة») */
-.pc-cta {
-  display: flex; align-items: center; gap: 12px; margin: 2px 0 18px;
-  padding: 12px 16px; border-radius: var(--radius);
-  background: linear-gradient(110deg, var(--pc) 0%, var(--pc-2) 100%);
-  color: var(--pc-ink); box-shadow: 0 8px 22px -10px color-mix(in srgb, var(--pc) 70%, transparent);
-  position: relative; overflow: hidden; transition: transform .15s, box-shadow .15s;
-}
-.pc-cta::after { content: ""; position: absolute; inset-inline-end: -30px; inset-block: -40px; width: 140px; background: rgba(255,255,255,.12); transform: skewX(-18deg); }
-.pc-cta:hover { transform: translateY(-1px); box-shadow: 0 12px 28px -10px color-mix(in srgb, var(--pc) 75%, transparent); }
-.pc-cta-icon { font-size: 1.7rem; line-height: 1; filter: drop-shadow(0 2px 4px rgba(0,0,0,.2)); }
-.pc-cta-body { flex: 1; min-width: 0; position: relative; z-index: 1; }
-.pc-cta-title { font-weight: 800; font-size: 1.02rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-cta-sub { font-size: .82rem; opacity: .92; margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-cta-go { font-weight: 800; font-size: .86rem; white-space: nowrap; background: rgba(255,255,255,.2); padding: 7px 12px; border-radius: 999px; position: relative; z-index: 1; }
-
-/* تبويب التوقّعات المميّز ضمن شريط التبويبات */
-.tab.pc-tab { color: var(--pc); font-weight: 700; }
-.tab.pc-tab.active { background: var(--surface); color: var(--pc); box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--pc) 40%, transparent), var(--shadow-xs); }
-
-/* رأس المسابقة داخل التبويب */
-.pc-wrap { --a: var(--pc); }
-.pc-hero {
-  border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 16px; color: #fff;
-  background: linear-gradient(135deg, var(--pc) 0%, var(--pc-2) 100%);
-  box-shadow: 0 10px 26px -12px color-mix(in srgb, var(--pc) 70%, transparent);
-}
-.pc-hero-top { display: flex; align-items: center; gap: 12px; }
-.pc-hero-icon { font-size: 1.9rem; line-height: 1; }
-.pc-hero-title { font-weight: 800; font-size: 1.22rem; line-height: 1.2; overflow-wrap: anywhere; }
-.pc-hero-sub { font-size: .78rem; opacity: .85; margin-top: 2px; }
-.pc-hero .badge { background: rgba(255,255,255,.22) !important; color: #fff !important; border-color: transparent !important; }
-.pc-hero-desc { margin: 12px 0 0; font-size: .88rem; opacity: .95; line-height: 1.6; }
-
-/* شريط «أنت مشارك» + صفّ الانضمام (زجاجي فوق التدرّج) */
-.pc-mine-bar, .pc-join-row {
-  display: flex; align-items: center; gap: 10px; margin-top: 14px;
-  background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25);
-  border-radius: 12px; padding: 8px 12px; backdrop-filter: blur(4px);
-}
-.pc-join-row { flex-wrap: wrap; }
-.pc-join-txt { flex: 1; min-width: 140px; font-size: .84rem; opacity: .95; }
-.pc-badge-in { font-weight: 800; font-size: .78rem; background: rgba(255,255,255,.9); color: var(--pc); padding: 3px 10px; border-radius: 999px; }
-.pc-mine-name { font-weight: 800; font-size: .92rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-note-warn { margin-top: 14px; background: rgba(255,255,255,.16); border-radius: 12px; padding: 10px 12px; font-size: .85rem; }
-/* أزرار فوق التدرّج */
-.pc-btn { background: #fff; color: var(--pc); border-color: transparent; font-weight: 800; }
-.pc-btn:hover { background: #fff; filter: brightness(.96); }
-.btn.btn-xs { padding: 5px 10px; font-size: .78rem; border-radius: 8px; }
-.pc-btn-ghost { background: rgba(255,255,255,.18); color: #fff; border-color: rgba(255,255,255,.35); }
-.pc-btn-ghost:hover { background: rgba(255,255,255,.28); }
-
-/* التبويبات الفرعيّة: الترتيب | توقّعاتي */
-.pc-subtabs { display: inline-flex; gap: 4px; padding: 4px; background: var(--surface-2); border-radius: 12px; margin-bottom: 16px; }
-.pc-subtab { border: 0; background: transparent; cursor: pointer; padding: 8px 16px; border-radius: 9px; font-weight: 700; font-size: .9rem; color: var(--text-2); transition: .15s; }
-.pc-subtab:hover { color: var(--ink); }
-.pc-subtab.active { background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--pc) 60%, transparent); }
-
-.pc-content { animation: pcFade .18s ease; }
-@keyframes pcFade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-
-/* مؤشّر «مباشر» فوق الجدول */
-.pc-live-line { display: flex; align-items: center; gap: 7px; margin: 0 2px 10px; font-size: .78rem; color: var(--text-2); font-weight: 600; }
-.pc-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--win); box-shadow: 0 0 0 0 color-mix(in srgb, var(--win) 60%, transparent); animation: pcPulse 1.8s infinite; }
-@keyframes pcPulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--win) 55%, transparent); } 70% { box-shadow: 0 0 0 7px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-.pc-hint { font-size: .8rem; color: var(--text-3); margin: 0 2px 12px; }
-
-/* بطاقتا الاحتساب + الجوائز — مضغوطتان */
-.pc-cards2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.pc-cards2 .card-pad { padding: 14px 16px; }
-.pc-card-title { font-weight: 800; font-size: .95rem; color: var(--ink); margin-bottom: 10px; }
-.pc-score-row, .pc-prize-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
-.pc-score-row:last-child, .pc-prize-row:last-child { border-bottom: 0; }
-.pc-score-lbl { color: var(--text-2); font-size: .85rem; }
-.pc-score-pts { font-weight: 800; color: var(--pc); white-space: nowrap; font-size: .9rem; }
-.pc-prize-rank { font-size: 1.05rem; min-width: 28px; }
-.pc-prize-txt { flex: 1; text-align: start; font-weight: 600; font-size: .85rem; color: var(--text); overflow-wrap: anywhere; }
-
-/* صفوف التوقّع — أصغر وأنيق */
-.pc-matches { display: flex; flex-direction: column; gap: 7px; }
-.pc-row { display: grid; grid-template-columns: 1fr auto 1fr auto; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow-xs); }
-.pc-row-team { font-weight: 700; font-size: .85rem; color: var(--ink); overflow-wrap: anywhere; }
-.pc-row-team:first-child { text-align: start; }
-.pc-row > .pc-row-team:nth-child(3) { text-align: end; }
-.pc-row-mid { display: flex; align-items: center; gap: 4px; justify-content: center; }
-.pc-colon { font-weight: 800; color: var(--text-3); }
-.pc-num { width: 42px; text-align: center; padding: 7px 4px; font-weight: 700; -moz-appearance: textfield; }
-.pc-num:focus { border-color: var(--pc); box-shadow: 0 0 0 3px color-mix(in srgb, var(--pc) 25%, transparent); }
-.pc-num::-webkit-outer-spin-button, .pc-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.pc-save { min-width: 38px; background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; border-color: transparent; font-weight: 700; }
-.pc-save:hover { filter: brightness(1.06); background: linear-gradient(135deg, var(--pc), var(--pc-2)); }
-.pc-result { font-weight: 900; font-size: 1rem; color: var(--ink); }
-.pc-result.is-live { color: var(--live); }
-.pc-row-locked { background: var(--surface-2); }
-.pc-row-meta { display: flex; align-items: center; gap: 8px; justify-content: flex-end; grid-column: 1 / -1; padding-top: 4px; border-top: 1px dashed var(--border); margin-top: 2px; }
-.pc-guess { font-size: .78rem; color: var(--text-2); }
-.pc-lock-note { font-size: .76rem; color: var(--text-3); font-weight: 600; }
-.pc-pts { font-weight: 800; font-size: .8rem; color: var(--text-3); background: var(--surface-3); padding: 2px 8px; border-radius: 999px; }
-.pc-pts.pos { color: var(--win); background: color-mix(in srgb, var(--win) 13%, transparent); }
-
-/* شارات جدول الترتيب — بلون المسابقة */
-.prize-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: var(--sun-ink); background: color-mix(in srgb, var(--gold) 15%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
-.me-chip { display: inline-block; margin-inline-start: 8px; font-size: .7rem; font-weight: 700; color: var(--pc); background: color-mix(in srgb, var(--pc) 12%, transparent); padding: 1px 8px; border-radius: 999px; vertical-align: middle; }
-table.standings tbody tr.is-me td { background: color-mix(in srgb, var(--pc) 9%, transparent); }
-table.standings tbody tr.is-me td:first-child { box-shadow: inset 3px 0 0 var(--pc); }
-
-/* شبكة نقاط الاحتساب في نموذج الإدارة */
-.pc-grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-.pc-grid3 .field { margin-bottom: 0; }
-
-/* بطاقات إدارة المسابقة (لوحة المنظّم) */
-.pc-adm-intro { display: flex; align-items: center; gap: 14px; padding: 14px 16px; margin-bottom: 18px; border-radius: var(--radius);
-  background: linear-gradient(120deg, color-mix(in srgb, var(--pc) 14%, var(--surface)), color-mix(in srgb, var(--pc-2) 10%, var(--surface)));
-  border: 1px solid color-mix(in srgb, var(--pc) 28%, var(--border)); }
-.pc-adm-intro-icon { font-size: 1.9rem; line-height: 1; }
-.pc-adm-new { background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; border-color: transparent; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 14px -4px color-mix(in srgb, var(--pc) 55%, transparent); }
-.pc-adm-new:hover { filter: brightness(1.07); background: linear-gradient(135deg, var(--pc), var(--pc-2)); }
-
-.pc-adm-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-sm); padding: 14px 16px; margin-bottom: 12px; border-inline-start: 4px solid color-mix(in srgb, var(--pc) 45%, var(--border)); }
-.pc-adm-card.is-open { border-inline-start-color: var(--pc); background: linear-gradient(90deg, color-mix(in srgb, var(--pc) 5%, var(--surface)), var(--surface) 60%); }
-.pc-adm-cardhead { display: flex; align-items: flex-start; gap: 10px; }
-.pc-adm-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 800; font-size: 1.05rem; color: var(--ink); }
-.pc-adm-sub { color: var(--text-2); font-size: .82rem; margin-top: 4px; }
-.pc-adm-hintline { color: var(--text-3); font-size: .8rem; margin-top: 4px; }
-.pc-adm-icons { display: flex; gap: 2px; flex-shrink: 0; }
-.pc-adm-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-.pc-adm-actions .btn { border-color: var(--border); }
-.pc-adm-actions .btn:hover { border-color: var(--pc); color: var(--pc); }
-
-@media (max-width: 560px) {
-  .pc-cards2 { grid-template-columns: 1fr; }
-  .pc-row-team { font-size: .8rem; }
-  .pc-num { width: 38px; }
-  .pc-hero-title { font-size: 1.1rem; }
-  .pc-cta-sub { display: none; }
-  .pc-adm-intro { flex-wrap: wrap; }
-  .pc-adm-new { width: 100%; }
-}
-
-/* ============================================================================
    قشرة نظام التصميم الجديد — عرض مرِح (Baloo)، أزرار قابلة للكبس، حركة نطّاطة
    (الرموز في :root تكفّلت بالألوان والزوايا والخط؛ هنا اللمسات الحيوية)
    ============================================================================ */
 
 /* الخطّ العريض المدوّر للعناوين والأرقام الكبيرة */
 h1, h2, h3, .page-title, .brand, .mp-title, .standings-title, .lc-events-title,
-.pc-title, .pc-hero-title, .t-card h3, .day-head { font-family: var(--font-display); }
+.t-card h3, .day-head { font-family: var(--font-display); }
 .mp-score, .lc-score, .score, .pts, .stat-val, .rank, .bk-score,
-.pc-result, .lc-stepper-val, .player-num { font-family: var(--font-display); }
+.lc-stepper-val, .player-num { font-family: var(--font-display); }
 .page-title { font-weight: 800; letter-spacing: -.01em; }
 
 /* أزرار «قابلة للكبس» — ظلّ صلب يختفي عند الضغط */
@@ -857,8 +753,6 @@ h1, h2, h3, .page-title, .brand, .mp-title, .standings-title, .lc-events-title,
 .tab { border-radius: var(--radius-pill); border: 1.5px solid var(--border); background: var(--surface); font-weight: 700; transition: var(--dur-fast) var(--ease-pop); }
 .tab:hover { border-color: var(--border-2); color: var(--ink); background: var(--surface); }
 .tab.active { background: var(--brand); color: #fff; border-color: var(--brand); box-shadow: 0 3px 10px -3px color-mix(in srgb, var(--brand) 60%, transparent); }
-.tab.pc-tab { color: var(--pc); border-color: color-mix(in srgb, var(--pc) 32%, var(--border)); }
-.tab.pc-tab.active { background: var(--pc); color: #fff; border-color: var(--pc); box-shadow: 0 3px 12px -3px color-mix(in srgb, var(--pc) 60%, transparent); }
 
 /* شارات حبّة دواء أوضح */
 .badge { border-radius: var(--radius-pill); border-width: 1.5px; font-weight: 800; }
@@ -914,73 +808,11 @@ h1, h2, h3, .page-title, .brand, .mp-title, .standings-title, .lc-events-title,
 
 /* ---- روابط أسماء الفرق إلى صفحة الفريق ------------------------------------ */
 a.team-link { color: inherit; text-decoration: none; }
-a.team-link:hover .team-name, a.team-link:hover .stat-team { text-decoration: underline; text-underline-offset: 3px; }
+a.team-link:hover .team-name { text-decoration: underline; text-underline-offset: 3px; }
 a.mp-team { color: inherit; text-decoration: none; cursor: pointer; }
 a.mp-team:hover .mp-team-name { text-decoration: underline; text-underline-offset: 3px; }
 
-/* ---- الدائرة العائمة للمسابقة (FAB) — تلتصق بالجوانب، تُسحب للحذف كـ365 ------ */
-.contest-fab {
-  position: fixed; z-index: 50;   /* تحت المودال (60) والتوست (80) */
-  right: 16px; top: auto; bottom: calc(20px + env(safe-area-inset-bottom, 0px));
-  width: 64px; height: 64px; border-radius: 50%; border: none;
-  background: linear-gradient(135deg, #7c3aed, #4f46e5);
-  color: #fff; display: grid; place-items: center;
-  box-shadow: 0 10px 26px rgba(79, 70, 229, .45);
-  cursor: grab; user-select: none; touch-action: none;
-  transition: transform .18s ease, box-shadow .18s ease;
-}
-.contest-fab:hover { transform: scale(1.06); box-shadow: 0 14px 32px rgba(79, 70, 229, .55); }
-/* أثناء السحب: بلا انتقال (يتبع الإصبع) */
-.contest-fab.dragging { cursor: grabbing; transition: none; transform: scale(1.05); }
-/* الالتصاق بالجانب: انتقال ناعم للموضع */
-.contest-fab.snapping { transition: left .26s cubic-bezier(.22,1,.36,1), right .26s cubic-bezier(.22,1,.36,1), top .26s cubic-bezier(.22,1,.36,1), transform .18s ease; }
-/* فوق منطقة الحذف: تصغُر وتخفت */
-.contest-fab.over-delete { transform: scale(.72); opacity: .55; }
-.contest-fab.popping { transition: transform .18s ease, opacity .18s ease; transform: scale(0); opacity: 0; }
-.contest-fab .fab-ico { font-size: 1.75rem; line-height: 1; animation: fabFloat 2.6s ease-in-out infinite; pointer-events: none; }
-.contest-fab::before {
-  content: ""; position: absolute; inset: -7px; border-radius: 50%;
-  border: 2px solid rgba(124, 58, 237, .55);
-  animation: fabPulse 2.2s ease-out infinite; pointer-events: none;
-}
-.contest-fab.dragging::before { animation: none; opacity: 0; }
-.contest-fab .fab-badge {
-  position: absolute; bottom: -9px; right: 50%; transform: translateX(50%);
-  background: #f59e0b; color: #3a2504; font-size: .68rem; font-weight: 800;
-  padding: 2px 9px; border-radius: 999px; white-space: nowrap;
-  box-shadow: 0 2px 6px rgba(0,0,0,.18); pointer-events: none;
-}
-.contest-fab.dragging .fab-badge { opacity: 0; }
 
-/* منطقة الحذف — تظهر أسفل الوسط أثناء السحب فقط */
-.fab-delete-zone {
-  position: fixed; z-index: 49; left: 50%; bottom: calc(30px + env(safe-area-inset-bottom, 0px));
-  width: 60px; height: 60px; border-radius: 50%;
-  display: grid; place-items: center;
-  background: rgba(120, 120, 130, .28); color: #fff; font-size: 1.3rem;
-  backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-  transform: translate(-50%, 20px) scale(.7); opacity: 0;
-  transition: transform .2s ease, opacity .2s ease, background .15s ease;
-  pointer-events: none;
-}
-.fab-delete-zone.in { transform: translate(-50%, 0) scale(1); opacity: 1; }
-.fab-delete-zone.hot {
-  background: var(--loss); transform: translate(-50%, 0) scale(1.3);
-  box-shadow: 0 0 0 8px color-mix(in srgb, var(--loss) 22%, transparent);
-}
-@keyframes fabPulse {
-  0% { transform: scale(.92); opacity: .9; }
-  70% { transform: scale(1.28); opacity: 0; }
-  100% { transform: scale(1.28); opacity: 0; }
-}
-@keyframes fabFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-@media (prefers-reduced-motion: reduce) {
-  .contest-fab .fab-ico, .contest-fab::before, .promo-ico { animation: none; }
-}
-
-/* نافذة إعلان المسابقة (مرة واحدة لكل زائر) */
-.promo-hero { text-align: center; }
-.promo-ico { font-size: 3rem; line-height: 1; animation: fabFloat 2.6s ease-in-out infinite; display: inline-block; }
 
 /* ============================================================================
    طبقة القشرة المرِحة — كانت theme-fun.css (دُمجت هنا لتوحيد المصدر: C1)
@@ -994,7 +826,6 @@ h1, h2, h3, .brand, .page-title, .standings-title, .mp-score, .lc-score,
 .tabs { border-radius: 999px; }
 .tab { border-radius: 999px; transition: .15s var(--ease-pop); }
 .tab.active { background: var(--brand); color: #fff; box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--brand) 55%, transparent); }
-.tab.pc-tab.active { background: linear-gradient(135deg, var(--pc), var(--pc-2)); color: #fff; box-shadow: none; }
 .btn-primary { box-shadow: 0 3px 0 var(--brand-deep); }
 .btn-primary:active { transform: translateY(3px); box-shadow: 0 0 0 var(--brand-deep); }
 .btn { transition: .15s var(--ease-pop); }
@@ -1039,9 +870,6 @@ table.standings .pts { color: var(--brand); font-size: 1rem; }
   .tabs { flex-wrap: wrap; border-radius: var(--radius-lg); }
 }
 
-/* C4: شارة «قيد الموافقة» على هيرو المسابقة — بديل الألوان المضمّنة الضعيفة */
-.pc-badge-in.is-pending { background: rgba(0, 0, 0, .28); color: #ffd98a; }
-
 /* C5: رابط الرجوع الموحَّد (كان نمطاً مضمّناً مكرَّراً 8 مرات) */
 .back-link { background: transparent; color: var(--text-2); padding: 0; font-size: .85rem; }
 
@@ -1055,22 +883,17 @@ table.standings .pts { color: var(--brand); font-size: 1rem; }
 
 /* C6: حلقة تركيز موحّدة لكل العناصر التفاعلية (كانت للأزرار فقط) */
 .tab:focus-visible, .chip:focus-visible, .seg-btn:focus-visible, .icon-btn:focus-visible,
-.link-btn:focus-visible, .pc-subtab:focus-visible, .header-icon-btn:focus-visible,
-.header-link:focus-visible, .pw-toggle:focus-visible, .contest-fab:focus-visible,
+.link-btn:focus-visible, .header-icon-btn:focus-visible,
+.header-link:focus-visible, .pw-toggle:focus-visible,
 .bk-edit-btn:focus-visible {
   outline: 2px solid var(--ring); outline-offset: 2px;
 }
-
-/* E14: جداول قابلة للتمرير أفقياً على الشاشات الضيقة */
-.table-scroll { overflow-x: auto; }
-.table-scroll table { table-layout: auto; min-width: 520px; }
 
 /* E2+E3: جوّال — حقول ≥16px (يمنع زوم iOS القسري) وأهداف لمس ≥44px */
 @media (hover: none) and (pointer: coarse) {
   .input, .select, textarea.input, .filter-select { font-size: 16px; }
   .header-icon-btn { width: 44px; height: 44px; }
-  .pw-toggle, .seg-btn, .pc-subtab, .link-btn, .bk-edit-btn { min-height: 44px; }
-  .pc-num { width: 48px; min-height: 44px; }
+  .pw-toggle, .seg-btn, .link-btn, .bk-edit-btn { min-height: 44px; }
 }
 
 /* E12: احترام تقليل الحركة في التمرير الناعم أيضاً */
@@ -1084,19 +907,13 @@ table.standings .pts { color: var(--brand); font-size: 1rem; }
 
 /* E11/الطباعة: إخفاء العناصر التفاعلية وطباعة ألوان فاتحة دائماً */
 @media print {
-  .contest-fab, .fab-delete-zone, .filter-selects, .pc-cta, .header-auth, .toast-host { display: none !important; }
+  .filter-selects, .header-auth, .toast-host { display: none !important; }
   :root, :root[data-theme="dark"] {
     --bg: #fff; --surface: #fff; --surface-2: #f5f5f5; --ink: #111; --text: #222;
     --text-2: #444; --text-3: #666; --border: #ccc;
   }
 }
 
-/* E8: تباين هيرو المسابقة — نهاية تدرّج أغمق ونصوص بلا شفافية */
-.pc-hero { background: linear-gradient(135deg, var(--pc), #a21caf); }
-.pc-hero-sub { opacity: 1; color: rgba(255, 255, 255, .95); }
-.pc-join-txt { color: rgba(255, 255, 255, .95); }
-
 /* E15: رفع النصوص متناهية الصغر إلى حدّ مقروء */
 table.standings th { font-size: .72rem; }
 .match .time .grp { font-size: .72rem; }
-.contest-fab .fab-badge { font-size: .68rem; }

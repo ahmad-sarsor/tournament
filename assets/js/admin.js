@@ -5,7 +5,7 @@ import { isConfigured } from "./firebase.js";
 import { t, formatDate, formatTime, weekdayName, statusLabel, matchStatusLabel } from "./i18n.js";
 import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog, downloadCsv } from "./util.js";
 import * as api from "./data.js";
-import { groupByDay, eventIcon, renderBracket, knockoutRoundName, shareCompetitionFlow } from "./render.js";
+import { groupByDay, eventIcon, renderBracket, knockoutRoundName } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
 import { ROSTER } from "./roster-data.js";
 
@@ -143,7 +143,7 @@ async function autoFinishStale() {
           status: "finished",
           home_score: m.home_score ?? 0,
           away_score: m.away_score ?? 0,
-          // نُبقي live_started_at كما هو (وقت البدء الفعلي) لعرضه في تدقيق التوقّعات
+          // نُبقي live_started_at كما هو (وقت البدء الفعلي) للسجلّ
         });
       } catch (_) { /* رُفضت لسببٍ ما — نتجاهلها ونكمل البقية */ }
     }
@@ -188,7 +188,7 @@ async function route() {
   if (!isConfigured) return renderSetupNeeded();
   if (!session) return renderLogin();
   // (A3) حساب بريد قديم غير مؤكَّد: شاشة التأكيد أولاً (كانت كوداً ميتاً لا يُستدعى)،
-  // ولا نستهلك مفتاح العودة قبل التأكيد — كان يرتد للمسابقة بلا تفسير في حلقة أبدية.
+  // ولا نستهلك مفتاح العودة قبل التأكيد — كان يرتد بلا تفسير في حلقة أبدية.
   const em = session.user.email || "";
   if (em && !api.isNoEmailAuthEmail(em) && !session.user.emailVerified) {
     clear(userBox); renderUserBox();
@@ -715,10 +715,10 @@ async function toggleMemberKey(u, on) {
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
 
-// حظر مستخدم (تبنيد): يمنعه فوراً من المشاركة في المسابقات — للمالك وحده
+// حظر مستخدم (تبنيد): يمنعه فوراً من استخدام المنصّة — للمالك وحده
 async function toggleBanned(u, on) {
   const label = u.name || u.username || u.email || "";
-  if (on && !(await confirmDialog(`حظر «${label}» من المشاركة في المسابقات؟`))) return;
+  if (on && !(await confirmDialog(`حظر «${label}» من المنصّة؟`))) return;
   try { await api.setUserBanned(u.id, on); toast(on ? t.userBannedDone : t.userUnbannedDone, "ok"); route(); }
   catch (e) { toast(e.message || t.errorGeneric, "err"); }
 }
@@ -759,7 +759,6 @@ async function renderTournamentAdmin(id, tab) {
     adminTab(t.knockout, id, "knockout", tab),
     adminTab(t.teamsTab, id, "teams", tab),
     adminTab(t.manageGroups, id, "groups", tab),
-    adminTab("🎯 " + t.predictionsAdmin, id, "predictions", tab),
     adminTab(t.editTournament, id, "details", tab),
   ]);
   const banner = scorerOnly ? el("div.alert.alert-warn", { style: "margin:10px 0 4px" }, [
@@ -777,503 +776,7 @@ async function renderTournamentAdmin(id, tab) {
   else if (tab === "groups") renderGroupsAdmin(content, state);
   else if (tab === "matches") renderMatchesTab(content, state);
   else if (tab === "knockout") renderKnockoutAdmin(content, state);
-  else if (tab === "predictions") renderPredictionsAdmin(content, state);
   else renderDetailsTab(content, state);
-}
-
-// ---- تبويب مسابقة التوقّعات (إدارة) ----------------------------------------
-
-function compStatusBadgeAdmin(status) {
-  const cls = { open: "badge-active", closed: "badge-upcoming", finished: "badge-finished" }[status] || "badge-upcoming";
-  return el("span.badge." + cls, { text: t["pc_status_" + status] || status });
-}
-function scoringSummary(c) {
-  const s = api.compScoring(c);
-  return `${t.scoringExact}: ${s.exact} · ${t.scoringDiff}: ${s.diff} · ${t.scoringOutcome}: ${s.outcome}`;
-}
-
-async function renderPredictionsAdmin(host, state) {
-  const { tournament } = state;
-  mount(host, spinner());
-  let comps = [];
-  try { comps = await api.fetchCompetitionsByTournament(tournament.id); }
-  catch (e) { return mount(host, el("div.alert.alert-error", { text: e.message || t.errorGeneric })); }
-
-  const wrap = el("div", {}, [
-    el("div.pc-adm-intro", {}, [
-      el("span.pc-adm-intro-icon", { text: "🎯" }),
-      el("div", { style: "flex:1;min-width:0" }, [
-        el("div", { style: "font-weight:800;font-size:1.02rem;color:var(--ink)", text: t.predictionComp }),
-        el("p.page-sub", { style: "margin:2px 0 0", text: t.predictionsIntro }),
-      ]),
-      el("button.btn.pc-adm-new", { text: t.newCompetition, onclick: () => competitionForm(state, null) }),
-    ]),
-  ]);
-  if (!comps.length) wrap.appendChild(emptyState("🎯", t.noCompetitions));
-
-  for (const c of comps) {
-    // عدّاد مشاركين حيّ على البطاقة (+ المنتظرين للاعتماد) — يُملأ فور جلب المتوقّعين
-    const cnt = el("div.pc-adm-sub", { text: "👥 …" });
-    api.fetchPredictors(c.id)
-      .then((list) => {
-        const pending = list.filter((p) => p.verified === false).length;
-        cnt.textContent = `👥 ${t.compParticipants}: ${list.length}`
-          + (pending ? ` · ⏳ ${t.pendingCountLbl}: ${pending}` : "");
-        if (pending) cnt.style.color = "var(--loss)";
-      })
-      .catch(() => { cnt.textContent = ""; });
-    wrap.appendChild(el("div.pc-adm-card" + (c.status === "open" ? ".is-open" : ""), {}, [
-      el("div.pc-adm-cardhead", {}, [
-        el("div.grow", {}, [
-          el("div.pc-adm-title", {}, [el("span", { text: c.title || t.predictionComp }), compStatusBadgeAdmin(c.status)]),
-          el("div.pc-adm-sub", { text: scoringSummary(c) }),
-          cnt,
-          (c.status === "draft") ? el("div.pc-adm-hintline", { text: "• " + t.pcDraftHint }) : null,
-        ]),
-        el("div.pc-adm-icons", {}, [
-          el("button.icon-btn", { text: "✎", title: t.edit, "aria-label": t.edit, onclick: () => competitionForm(state, c) }),
-          el("button.icon-btn", { text: "🗑", title: t.delete, "aria-label": t.delete, onclick: () => removeCompetition(c) }),
-        ]),
-      ]),
-      el("div.pc-adm-actions", {}, [
-        (c.status === "open" || c.status === "closed")
-          ? el("button.btn.btn-sm" + (c.predictions_open === false ? ".btn-primary" : ""), {
-              text: c.predictions_open === false ? "▶ " + t.startPredictions : "⏸ " + t.stopPredictions,
-              onclick: () => togglePredictions(c),
-            })
-          : null,
-        el("button.btn.btn-sm", { text: "👥 " + t.viewParticipants, onclick: () => participantsModal(c, tournament) }),
-        el("button.btn.btn-sm.btn-danger", { text: "♻️ " + t.resetPoints, onclick: () => resetPoints(c) }),
-        el("button.btn.btn-sm", { text: "🖼 " + t.exportImage, onclick: () => exportBoardImageFor(c, tournament) }),
-        el("button.btn.btn-sm", { text: "↗ " + t.shareComp, onclick: () => shareCompetition(c, tournament) }),
-        el("a.btn.btn-sm", { href: `./index.html#/t/${tournament.id}/predictions`, target: "_blank", text: "🏅 " + t.openBoard }),
-      ]),
-    ]));
-  }
-  mount(host, wrap);
-
-  // مزامنة صامتة لمواعيد القفل المخزَّنة مع الصيغة الحالية (قفل قبل ساعة) — كي تفرضها
-  // قواعد الخادم على المباريات القائمة أيضاً. آمنة للتكرار: لا تكتب إلا عند وجود اختلاف.
-  api.syncMatchLocks(tournament.id)
-    .then((n) => { if (n) toast(t.locksSynced.replace("{n}", String(n)), "ok"); })
-    .catch((e) => console.warn("syncMatchLocks", e));
-}
-
-// تصدير صورة (PNG) لجدول الترتيب — للمنظّم فقط. يجلب البيانات ثم يرسمها على canvas.
-async function exportBoardImageFor(comp, tournament) {
-  toast(t.loading, "");
-  try {
-    const [predictors, predictions, bundle] = await Promise.all([
-      api.fetchPredictors(comp.id), api.fetchPredictions(comp.id), api.fetchTournamentBundle(tournament.id),
-    ]);
-    const standings = api.computePredictionStandings(predictors, predictions, bundle.matches, comp);
-    if (!standings.length) return toast(t.noParticipants, "err");
-    await exportBoardImage(comp, standings);
-  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
-}
-
-async function exportBoardImage(comp, standings) {
-  try { await document.fonts.ready; } catch {}
-  const rows = standings.slice(0, 60);
-  const W = 680, padX = 26, headH = 118, rowH = 44, footH = 46;
-  const H = headH + Math.max(1, rows.length) * rowH + footH;
-  const s = 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = W * s; canvas.height = H * s;
-  const ctx = canvas.getContext("2d");
-  ctx.scale(s, s);
-  const FONT = "'IBM Plex Sans Arabic','Tajawal',sans-serif";
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, "#241b52"); g.addColorStop(1, "#3b0764");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-
-  ctx.textAlign = "right"; ctx.fillStyle = "#fff";
-  ctx.font = `800 30px ${FONT}`;
-  ctx.fillText("🏅 " + (comp.title || "ترتيب المتوقّعين"), W - padX, 54);
-  ctx.font = `500 17px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.72)";
-  ctx.fillText("مسابقة التوقّعات · جدول الترتيب", W - padX, 84);
-
-  const y = headH;
-  ctx.font = `700 13px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.5)";
-  ctx.textAlign = "right"; ctx.fillText("المتوقّع", W - 64, y - 12);
-  ctx.textAlign = "left"; ctx.fillText("النقاط", padX + 6, y - 12);
-
-  const medal = (r) => ({ 1: "🥇", 2: "🥈", 3: "🥉" }[r] || String(r));
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i], top3 = r.rank <= 3, ry = y + i * rowH;
-    if (top3 || i % 2) { ctx.fillStyle = top3 ? "rgba(255,255,255,.10)" : "rgba(255,255,255,.04)"; ctx.fillRect(padX - 8, ry, W - 2 * (padX - 8), rowH - 4); }
-    ctx.textAlign = "right"; ctx.font = `800 ${top3 ? 20 : 16}px ${FONT}`;
-    ctx.fillStyle = top3 ? "#fbbf24" : "rgba(255,255,255,.6)";
-    ctx.fillText(medal(r.rank), W - padX, ry + 28);
-    ctx.font = `700 17px ${FONT}`; ctx.fillStyle = "#fff";
-    let name = r.predictor.name || "—", full = name;
-    while (ctx.measureText(name).width > W - 230 && name.length > 4) name = name.slice(0, -2);
-    if (name !== full) name += "…";
-    ctx.fillText(name, W - padX - 46, ry + 28);
-    ctx.textAlign = "left"; ctx.font = `900 19px ${FONT}`; ctx.fillStyle = "#c4b5fd";
-    ctx.fillText(String(r.points), padX + 6, ry + 28);
-  }
-
-  ctx.textAlign = "center"; ctx.font = `500 13px ${FONT}`; ctx.fillStyle = "rgba(255,255,255,.45)";
-  ctx.fillText("منصّة البطولات · مسابقة التوقّعات", W / 2, H - 18);
-
-  canvas.toBlob((blob) => {
-    if (!blob) return toast(t.errorGeneric, "err");
-    const url = URL.createObjectURL(blob);
-    const safe = String(comp.title || "leaderboard").replace(/[\\/:*?"<>|]/g, "-").slice(0, 40);
-    const a = el("a", { href: url, download: safe + ".png", style: "display:none" });
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 0);
-    toast(t.imageReady, "ok");
-  }, "image/png");
-}
-
-function competitionForm(state, existing) {
-  const { tournament } = state;
-  const numInput = (v) => el("input.input", { type: "number", min: "0", inputmode: "numeric", value: String(v) });
-  const titleI = el("input.input", { type: "text", maxlength: "120", value: existing?.title || "", placeholder: t.compTitlePlaceholder });
-  const descI = el("textarea.input", { rows: "2" }); descI.value = existing?.description || "";
-  const statusSel = el("select.select", {}, ["draft", "open", "closed", "finished"].map((s) => {
-    const o = el("option", { value: s, text: t["pc_status_" + s] });
-    if ((existing?.status || "draft") === s) o.selected = true;
-    return o;
-  }));
-  const predOpenI = el("input", { type: "checkbox" });
-  predOpenI.checked = existing ? existing.predictions_open !== false : false;
-  const exactI = numInput(existing?.pts_exact ?? 5);
-  const diffI = numInput(existing?.pts_diff ?? 3);
-  const outI = numInput(existing?.pts_outcome ?? 2);
-  const winnersI = numInput(existing?.winners_count ?? 3);
-  const prizesI = el("textarea.input", { rows: "4", placeholder: "🥇 …\n🥈 …\n🥉 …" });
-  prizesI.value = Array.isArray(existing?.prizes) ? existing.prizes.join("\n") : "";
-  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
-
-  const body = el("div", {}, [
-    el("div.field", {}, [el("label", { text: t.compTitle }), titleI]),
-    el("div.field", {}, [el("label", { text: t.compDesc }), descI]),
-    el("div.field", {}, [el("label", { text: t.compStatus }), statusSel, el("div.field-hint", { text: t.compLaunchHint })]),
-    el("div.field", {}, [
-      el("label", { style: "display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600" }, [predOpenI, el("span", { text: t.predictionsOpenLabel })]),
-      el("div.field-hint", { text: t.predictionsOpenHint }),
-    ]),
-    el("div.pc-grid3", {}, [
-      el("div.field", {}, [el("label", { text: t.ptsExact }), exactI]),
-      el("div.field", {}, [el("label", { text: t.ptsDiff }), diffI]),
-      el("div.field", {}, [el("label", { text: t.ptsOutcome }), outI]),
-    ]),
-    el("div.field", {}, [el("label", { text: t.winnersCount }), winnersI]),
-    el("div.field", {}, [el("label", { text: t.prizesField }), prizesI, el("div.field-hint", { text: t.prizesFieldHint })]),
-    err,
-  ]);
-
-  let busy = false;
-  async function submit() {
-    if (busy) return;
-    const title = titleI.value.trim();
-    if (!title) { err.hidden = false; err.textContent = "العنوان مطلوب"; return; }
-    const prizes = prizesI.value.split(/\r?\n/).map((s) => s.trim());
-    while (prizes.length && prizes[prizes.length - 1] === "") prizes.pop();
-    const payload = {
-      title,
-      description: descI.value.trim() || null,
-      status: statusSel.value,
-      predictions_open: predOpenI.checked,
-      pts_exact: toInt(exactI.value, 5),
-      pts_diff: toInt(diffI.value, 3),
-      pts_outcome: toInt(outI.value, 2),
-      winners_count: toInt(winnersI.value, 3),
-      prizes,
-    };
-    busy = true;
-    try {
-      if (existing) await api.updateCompetition(existing.id, payload);
-      else await api.createCompetition({ tournament_id: tournament.id, sort_order: Date.now(), ...payload });
-      close(); toast(t.compSaved, "ok"); route();
-    } catch (e) { busy = false; err.hidden = false; err.textContent = e.message || t.errorGeneric; }
-  }
-
-  const close = openModal({
-    title: existing ? "✎ " + t.editCompetition : "🎯 " + t.predictionComp,
-    body,
-    footer: [
-      el("button.btn.btn-primary", { type: "button", text: t.save, onclick: submit }),
-      el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close() }),
-    ],
-  });
-}
-
-// بدء/إيقاف إدخال التوقّعات (مرحلة «تسجيل فقط»): التسجيل يبقى مضبوطًا بالحالة (status)
-async function togglePredictions(c) {
-  const open = c.predictions_open === false;   // نُبدّل إلى المعاكس
-  try {
-    await api.updateCompetition(c.id, { predictions_open: open });
-    toast(open ? t.predictionsStarted : t.predictionsStopped, "ok");
-    route();
-  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
-}
-
-// تصفير نقاط المسابقة: حذف كل التوقّعات + إرجاع تسويات النقاط صفراً (تأكيد مزدوج — لا رجوع)
-async function resetPoints(c) {
-  if (!(await confirmDialog(t.resetPointsQ))) return;
-  if (!(await confirmDialog(t.resetPointsQ2))) return;
-  toast(t.loading, "");
-  try {
-    const n = await api.resetCompetitionPoints(c);
-    toast(t.resetPointsDone.replace("{n}", String(n)), "ok");
-    route();
-  } catch (e) { toast(e.message || t.errorGeneric, "err"); }
-}
-
-async function removeCompetition(c) {
-  if (!(await confirmDialog(t.deleteCompetitionQ))) return;
-  try { await api.deleteCompetition(c.id); toast(t.deleted, "ok"); route(); }
-  catch (e) { toast(e.message || t.errorGeneric, "err"); }
-}
-
-// قائمة المشاركين مع بيانات التواصل والنقاط (للمنظّم فقط) + تعديل/حذف/اعتماد
-async function participantsModal(comp, tournament) {
-  const body = el("div", {}, [spinner()]);
-  openModal({ title: "👥 " + t.participantsTitle, body });
-  await loadParticipants(body, comp, tournament);
-}
-
-async function loadParticipants(body, comp, tournament) {
-  mount(body, spinner());
-  const reload = () => loadParticipants(body, comp, tournament);
-  try {
-    // بيانات التواصل قد تفشل (قواعد لم تُنشر بعد/صلاحية ناقصة) — نُظهر الجدول بدونها بدل فشل كامل
-    const [predictors, contacts, predictions, bundle] = await Promise.all([
-      api.fetchPredictors(comp.id),
-      api.fetchPredictorContacts(comp.id, tournament.id).catch((e) => { console.warn(e); return null; }),
-      api.fetchPredictions(comp.id), api.fetchTournamentBundle(tournament.id),
-    ]);
-    const contactsFailed = contacts == null;
-    const contactByUid = new Map((contacts || []).map((c) => [c.uid, c]));
-    const standings = api.computePredictionStandings(predictors, predictions, bundle.matches, comp);
-    if (!standings.length) { mount(body, emptyState("👥", t.noParticipants)); return; }
-
-    // شارة «بانتظار الموافقة» + زر اعتماد (لمدير المنصّة — القواعد تفرض ذلك)
-    const pendingCell = (p) => {
-      const wrap = el("div", { style: "display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap" }, [
-        el("span.badge.badge-upcoming", { text: "⏳ " + t.pendingCountLbl }),
-      ]);
-      if (isPlatformAdminUser) {
-        const b = el("button.btn.btn-sm.btn-primary", { type: "button", text: "✓ " + t.approveBtn });
-        b.addEventListener("click", async () => {
-          b.disabled = true;
-          try {
-            await api.approvePredictor(p.id);
-            toast(t.approvedDone, "ok");
-            wrap.replaceWith(el("span.badge.badge-active", { text: "✓ " + t.approvedDone }));
-          } catch (e) { b.disabled = false; toast(e.message || t.errorGeneric, "err"); }
-        });
-        wrap.appendChild(b);
-      }
-      return wrap;
-    };
-
-    const table = el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:560px" }, [
-      el("thead", {}, [el("tr", {}, [
-        el("th.rank-col", { text: "#" }),
-        el("th.team-col", { text: t.regName }),
-        el("th", { text: t.th_phone }),
-        el("th", { text: t.email }),
-        el("th.stat-col", { text: t.th_age }),
-        el("th.pts-col", { text: t.th_pts_total }),
-        el("th", { text: "" }),
-      ])]),
-      el("tbody", {}, standings.map((r) => {
-        const c = contactByUid.get(r.predictor.uid) || {};
-        return el("tr" + (r.rank === 1 ? ".champion" : ""), {}, [
-          el("td", {}, [el("span.rank", { text: String(r.rank) })]),
-          el("td.team-col", {}, [
-            el("span.team-name", { text: r.predictor.name || "—" }),
-            (r.predictor.points_adj ? el("span", { style: "font-size:.75rem;color:var(--text-3);margin-inline-start:6px", text: `(± ${r.predictor.points_adj})` }) : null),
-            r.predictor.verified === false ? pendingCell(r.predictor) : null,
-          ]),
-          el("td", { style: "direction:ltr;text-align:start", text: (c.phone || "—") + (c.phone_verified ? " ✓" : "") }),
-          el("td", { style: "direction:ltr;text-align:start;font-size:.8rem", text: c.email || "—" }),
-          el("td", { text: c.age != null ? String(c.age) : "—" }),
-          el("td", {}, [el("span.pts", { text: String(r.points) })]),
-          el("td", {}, [el("div", { style: "display:flex;gap:4px" }, [
-            el("button.icon-btn", { text: "👁", title: t.viewPredictions, "aria-label": t.viewPredictions,
-              onclick: () => participantPredictionsModal(comp, r, predictions, bundle, reload) }),
-            el("button.icon-btn", { text: "✎", title: t.editParticipant, "aria-label": t.editParticipant,
-              onclick: () => participantEditForm(comp, r, contactByUid.get(r.predictor.uid) || null, reload) }),
-            el("button.icon-btn", { text: "🗑", title: t.deleteParticipant, "aria-label": t.deleteParticipant, onclick: async () => {
-              if (!(await confirmDialog(`${t.deleteParticipantQ} (${r.predictor.name || "—"})`))) return;
-              try { await api.deleteParticipant(comp, r.predictor.uid); toast(t.participantDeleted, "ok"); reload(); }
-              catch (e) { toast(e.message || t.errorGeneric, "err"); }
-            } }),
-          ])]),
-        ]);
-      })),
-    ])]);
-
-    const exportBtn = el("button.btn.btn-sm.btn-primary", { type: "button", text: "⬇ " + t.exportCsv, onclick: () => {
-      const rows = [[t.th_rank, t.regName, t.th_phone, t.phoneVerifiedMark, t.email, t.th_age, t.th_pts_total, t.th_exactCol, t.th_hitsCol, t.th_joinedAt]];
-      for (const r of standings) {
-        const c = contactByUid.get(r.predictor.uid) || {};
-        rows.push([r.rank, r.predictor.name || "", c.phone || "", c.phone_verified ? "✓" : "", c.email || "", c.age ?? "",
-          r.points, r.exact, r.hits, c.created_at ? fmtWhen(c.created_at) : ""]);
-      }
-      const safe = String(comp.title || "predictions").replace(/[\\/:*?"<>|]/g, "-").slice(0, 40);
-      downloadCsv(`${safe}.csv`, rows);
-      toast(t.csvExported, "ok");
-    } });
-
-    mount(body,
-      el("div", { style: "display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 12px" }, [
-        el("span.page-sub", { style: "margin:0", text: `${t.compParticipants}: ${standings.length}` }),
-        exportBtn,
-      ]),
-      contactsFailed ? el("div.alert.alert-warn", { style: "margin:0 0 12px", text: t.contactsLoadFailed }) : null,
-      table);
-  } catch (e) {
-    mount(body, el("div.alert.alert-error", { text: e.message || t.errorGeneric }));
-  }
-}
-
-// عرض كل توقّعات مشارك مع أوقاتها (وقت التوقّع + مواعيد المباراة) وحذف أي توقّع (لغشٍّ مثلاً) — للمنظّم
-function participantPredictionsModal(comp, row, predictions, bundle, onChange) {
-  const p = row.predictor;
-  const teamById = new Map(bundle.teams.map((tm) => [tm.id, tm]));
-  const matchById = new Map(bundle.matches.map((m) => [m.id, m]));
-  const order = new Map(bundle.matches.map((m, i) => [m.id, i]));
-  const cfg = api.compScoring(comp);
-  let mine = predictions.filter((x) => x.uid === p.uid)
-    .sort((a, b) => (order.get(a.match_id) ?? 1e9) - (order.get(b.match_id) ?? 1e9));
-
-  const body = el("div");
-  // موعد المباراة المجدول (تاريخ+وقت نصّيان)
-  const schedTxt = (m) => (m && m.match_date)
-    ? formatDate(m.match_date) + (m.match_time ? " " + formatTime(m.match_time) : "")
-    : "—";
-  const timeCell = (txt) => el("td", { style: "direction:ltr;text-align:start;white-space:nowrap;font-size:.78rem", text: txt || "—" });
-
-  const render = () => {
-    clear(body);
-    if (!mine.length) { body.appendChild(emptyState("🔮", t.noPredictionsYet)); return; }
-    const trs = mine.map((pr) => {
-      const m = matchById.get(pr.match_id);
-      const home = m ? (teamById.get(m.home_team_id)?.name || "—") : "—";
-      const away = m ? (teamById.get(m.away_team_id)?.name || "—") : "—";
-      const counted = m && api.isCounted(m);
-      const finished = m && m.status === "finished";
-      const result = counted ? `${m.home_score} : ${m.away_score}` : (m ? matchStatusLabel(m.status) : "—");
-      const pts = counted ? api.predictionPoints(pr, m, cfg) : null;
-      // مقارنة وقت الحفظ بموعد القفل: وسم «بعد القفل» للتوقّعات المتأخّرة (شفافية للمنظّم)
-      const late = (m && m.locks_at != null && pr.created_at != null) ? pr.created_at >= m.locks_at : false;
-      const delBtn = el("button.icon-btn", { text: "🗑", title: t.deletePrediction, onclick: async () => {
-        if (!(await confirmDialog(t.deletePredictionQ))) return;
-        try {
-          await api.deletePrediction(pr.id);
-          const gi = predictions.indexOf(pr); if (gi >= 0) predictions.splice(gi, 1);   // زامن المصفوفة المشتركة
-          mine = mine.filter((x) => x !== pr);
-          toast(t.predictionDeleted, "ok");
-          render();                 // حدّث النافذة فوراً
-          onChange?.();             // أعد تحميل جدول المشاركين وأعد احتساب النقاط (يُخصم توقّع المحذوف)
-        } catch (e) { toast(e.message || t.errorGeneric, "err"); }
-      } });
-      return el("tr", {}, [
-        el("td.team-col", { text: `${home} × ${away}` }),
-        el("td", { style: "font-weight:800;white-space:nowrap", text: `${pr.home} : ${pr.away}` }),
-        el("td", { style: "white-space:nowrap", text: result }),
-        pts != null ? el("td", {}, [el("span.pts", { text: "+" + pts })]) : el("td", { text: "—" }),
-        timeCell(schedTxt(m)),
-        timeCell(m && m.live_started_at ? fmtWhen(m.live_started_at) : "—"),
-        timeCell(finished && m.finished_at ? fmtWhen(m.finished_at) : "—"),
-        el("td", { style: "direction:ltr;text-align:start;white-space:nowrap;font-size:.78rem" }, [
-          el("span", { text: fmtWhen(pr.created_at) || "—" }),
-          late ? el("span.badge.badge-finished", { style: "margin-inline-start:6px", text: t.predAfterLock }) : null,
-        ]),
-        el("td", {}, [delBtn]),
-      ]);
-    });
-    body.appendChild(el("div.table-wrap", { style: "overflow-x:auto" }, [el("table.standings", { style: "table-layout:auto;min-width:820px" }, [
-      el("thead", {}, [el("tr", {}, [
-        el("th.team-col", { text: t.th_match }),
-        el("th", { text: t.th_guess }),
-        el("th", { text: t.th_predResult }),
-        el("th.pts-col", { text: t.th_pts_total }),
-        el("th", { text: t.th_scheduled }),
-        el("th", { text: t.th_started }),
-        el("th", { text: t.th_ended }),
-        el("th", { text: t.th_predAt }),
-        el("th", { text: "" }),
-      ])]),
-      el("tbody", {}, trs),
-    ])]));
-  };
-
-  render();
-  openModal({ title: "👁 " + t.predictionsOf.replace("{name}", p.name || "—"), body });
-}
-
-// نموذج تعديل مشارك بيد المنظّم: اسم/هاتف/بريد/عمر + «تسوية النقاط» (±)
-function participantEditForm(comp, row, contact, onSaved) {
-  const p = row.predictor;
-  const nameI = el("input.input", { type: "text", maxlength: "60", value: p.name || "" });
-  const phoneI = el("input.input", { type: "tel", maxlength: "40", value: contact?.phone || "", style: "direction:ltr;text-align:end" });
-  const emailI = el("input.input", { type: "email", maxlength: "120", value: contact?.email || "", style: "direction:ltr;text-align:end" });
-  const ageI = el("input.input", { type: "number", min: "3", max: "120", inputmode: "numeric", value: contact?.age ?? "" });
-  // (E7) لوحة الأرقام على iOS بلا زر سالب — أزرار ± تضمن الخصم من أي جهاز
-  const adjI = el("input.input", { type: "number", min: "-9999", max: "9999", value: String(p.points_adj ?? 0), style: "direction:ltr;text-align:center;flex:1" });
-  const adjStep = (d) => {
-    const v = parseInt(adjI.value, 10);
-    adjI.value = String(Math.max(-9999, Math.min(9999, (Number.isFinite(v) ? v : 0) + d)));
-  };
-  const adjRow = el("div", { style: "display:flex;gap:8px;align-items:center" }, [
-    el("button.btn.btn-sm.btn-outline", { type: "button", text: "−", "aria-label": "إنقاص", onclick: () => adjStep(-1) }),
-    adjI,
-    el("button.btn.btn-sm.btn-outline", { type: "button", text: "＋", "aria-label": "زيادة", onclick: () => adjStep(1) }),
-  ]);
-  const err = el("div.alert.alert-error", { hidden: true, role: "alert" });
-
-  const body = el("div", {}, [
-    el("div.field", {}, [el("label", { text: t.regName }), nameI]),
-    el("div.field", {}, [el("label", { text: t.regPhone }), phoneI,
-      contact?.phone_verified ? el("div.field-hint", { text: "✓ " + t.phoneVerifiedMark + " — " + t.phoneEditDropsBadge }) : null]),
-    el("div.field", {}, [el("label", { text: t.regEmail }), emailI]),
-    el("div.field", {}, [el("label", { text: t.regAge }), ageI]),
-    el("div.field", {}, [el("label", { text: t.pointsAdjLbl }), adjRow,
-      el("div.field-hint", { text: t.pointsAdjHint.replace("{pts}", String(row.points)) })]),
-    err,
-  ]);
-
-  let busy = false;
-  async function submit() {
-    if (busy) return;
-    err.hidden = true;
-    const name = nameI.value.trim();
-    if (!name) { err.hidden = false; err.textContent = t.regNameShort; return; }
-    const adjRaw = parseInt(adjI.value, 10);
-    const pointsAdj = Number.isFinite(adjRaw) ? adjRaw : 0;
-    busy = true;
-    try {
-      await api.adminUpdateParticipant(comp, p.uid, {
-        name, phone: phoneI.value.trim(), email: emailI.value.trim(), age: ageI.value.trim(), pointsAdj,
-      });
-      close(); toast(t.participantSaved, "ok"); onSaved();
-    } catch (e) { busy = false; err.hidden = false; err.textContent = e.message || t.errorGeneric; }
-  }
-
-  const close = openModal({
-    title: "✎ " + t.editParticipant,
-    body,
-    footer: [
-      el("button.btn.btn-primary", { type: "button", text: t.save, onclick: submit }),
-      el("button.btn.btn-outline", { type: "button", text: t.cancel, onclick: () => close() }),
-    ],
-  });
-}
-
-// مشاركة رابط المسابقة (نسخ + مشاركة أصليّة + رمز QR)
-function shareCompetition(comp, tournament) {
-  // نفس مسار المشاركة العامّ: صورة دعوة مولَّدة + نص + رابط (واتساب…)، أو نافذة تنزيل/نسخ/QR
-  const u = new URL("./index.html", location.href);   // صفحة العرض العامّة (شقيقة admin.html)
-  u.hash = `#/t/${tournament.id}/predictions`;
-  shareCompetitionFlow(comp, tournament, u.href);
 }
 
 // ---- تبويب خروج المغلوب (إدارة) --------------------------------------------
@@ -2209,6 +1712,14 @@ async function renderLiveConsole(tid, matchId) {
       .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
   }
 
+  // عدد أهداف الفريق المنسوبة بأحداث (عادية + عكسية لصالحه) — لمنطق «نسبة أم زيادة»
+  function namedGoalsOf(teamId) {
+    return (bundle.events || []).filter((e) =>
+      e.match_id === matchId && e.team_id === teamId && (e.type === "goal" || e.type === "own_goal")).length;
+  }
+
+  // type: goal | own_goal | yellow | red — في العكسي يُختار اللاعب من فريقه (مَن سجّل في مرماه)
+  // وتُحتسب النتيجة للفريق الآخر (المستفيد)
   function openPicker(type, teamId) {
     const team = teamById.get(teamId);
     const players = playersOf(teamId);
@@ -2220,8 +1731,11 @@ async function renderLiveConsole(tid, matchId) {
       close();
       try {
         if (type === "goal") {
-          const teamGoals = (bundle.events || []).filter((e) => e.match_id === matchId && e.team_id === teamId && e.type === "goal").length;
-          await api.addGoal(match, teamId, playerId, minute, teamGoals);
+          await api.addGoal(match, teamId, playerId, minute, namedGoalsOf(teamId));
+        } else if (type === "own_goal") {
+          const benefitTeamId = match.home_team_id === teamId ? match.away_team_id : match.home_team_id;
+          if (!benefitTeamId) return toast(t.errorGeneric, "err");
+          await api.addOwnGoal(match, benefitTeamId, playerId, minute, namedGoalsOf(benefitTeamId));
         } else await api.addCard(match, teamId, playerId, minute, type);
         toast(t.saved, "ok");
         await reload();
@@ -2261,7 +1775,7 @@ async function renderLiveConsole(tid, matchId) {
     grid.appendChild(el("button.btn.player-pick.pick-new", { type: "button", text: "＋ " + t.newPlayer, onclick: addNewThenPick }));
     grid.appendChild(el("button.btn.btn-outline.player-pick", { type: "button", text: t.noPlayerKnown, onclick: () => pick(null) }));
     close = openModal({
-      title: `${eventIcon(type)} ${type === "goal" ? t.whoScored : t.whoBooked}`,
+      title: `${eventIcon(type)} ${type === "goal" ? t.whoScored : type === "own_goal" ? t.whoOwnGoal : t.whoBooked}`,
       body: el("div", {}, [
         el("div.lc-picker-team", { text: team ? team.name : "" }),
         el("div.field", {}, [el("label", { text: t.minute, for: "picker-min" }), (minInput.id = "picker-min", minInput)]),
@@ -2292,8 +1806,7 @@ async function renderLiveConsole(tid, matchId) {
 
   async function delEvent(ev) {
     if (!(await confirmDialog(t.deleteEventQ))) return;
-    const teamGoals = (bundle.events || []).filter((e) => e.match_id === matchId && e.team_id === ev.team_id && e.type === "goal").length;
-    try { await api.removeEvent(ev, match, teamGoals); toast(t.deleted, "ok"); await reload(); }
+    try { await api.removeEvent(ev, match, namedGoalsOf(ev.team_id)); toast(t.deleted, "ok"); await reload(); }
     catch (e) { toast(e.message || t.errorGeneric, "err"); }
   }
 
@@ -2345,6 +1858,8 @@ async function renderLiveConsole(tid, matchId) {
     return el("div.lc-side", {}, [
       el("div.lc-side-name", { text: team ? team.name : "—" }),
       el("button.btn.lc-btn.lc-goal", { type: "button", text: "⚽ " + t.goal, onclick: () => openPicker("goal", teamId) }),
+      // هدف عكسي: لاعب من هذا الفريق سجّل في مرماه — يُحتسب للفريق الآخر
+      el("button.btn.lc-btn.lc-own-goal", { type: "button", text: "🔄 " + t.ownGoal, title: t.ownGoalHint, onclick: () => openPicker("own_goal", teamId) }),
       el("div.lc-cards", {}, [
         el("button.btn.lc-btn.lc-yellow", { type: "button", text: "🟨", title: t.yellowCard, onclick: () => openPicker("yellow", teamId) }),
         el("button.btn.lc-btn.lc-red", { type: "button", text: "🟥", title: t.redCard, onclick: () => openPicker("red", teamId) }),
@@ -2383,6 +1898,8 @@ async function renderLiveConsole(tid, matchId) {
         el("span.tl-ico", { text: eventIcon(e.type) }),
         el("span.tl-txt", {}, [
           el("span.tl-player", { text: p ? p.name : t.unknownPlayer }),
+          // العكسي: الحدث منسوب للفريق المستفيد واللاعب من الخصم — وسم يوضّح ذلك
+          e.type === "own_goal" ? el("span.ev-og", { text: t.ownGoalMark }) : null,
           tm ? el("span.tl-team", { text: tm.name }) : null,
         ]),
         el("button.icon-btn", { text: "✕", title: t.delete, onclick: () => delEvent(e) }),
