@@ -40,6 +40,11 @@ function canScoreTournament(tr) {
 }
 // رسالة خطأ مصادقة واضحة حسب رمز Firebase (مع رسالة احتياطية)
 const authMsg = (e, fallback) => (e && t.authErrors && t.authErrors[e.code]) || fallback;
+// ---- أدوات الإعداد لمرّة واحدة (توليد المباريات + استيراد اللاعبين) ---------
+// بعد اكتمال إعداد البطولة نُخفيها كي لا تُضغط بالخطأ فتُتلف البرنامج.
+// لإعادة إظهارها في بطولة جديدة: بدّل القيمة إلى true فقط.
+const SHOW_SETUP_TOOLS = false;
+
 let uid = 0; // عدّاد لتوليد معرّفات فريدة لحقول النماذج (ربط label بالحقل)
 let adminUnsub = null; // اشتراك التحديث اللحظي (للوحة الإدارة المباشرة)
 let adminAnchorPending = true; // (D8) قفزة المرساة عند فتح التبويب فقط، لا بعد كل حفظ
@@ -1544,7 +1549,8 @@ function renderTeamsAdmin(host, state) {
     el("p.page-sub", { style: "margin-bottom:12px", text: "كل الفرق. عدّل بيت كل فريق من زرّ التعديل (اتركه «بدون بيت» لخروج المغلوب أو الدوري الفردي)." }),
     el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
       el("button.btn.btn-primary", { text: "＋ " + t.addTeam, onclick: () => teamForm(tournament.id, groups, null) }),
-      teams.length ? el("button.btn.btn-outline", { text: "👥 استيراد اللاعبين والطاقم", onclick: () => importRosterFlow(state) }) : null,
+      SHOW_SETUP_TOOLS && teams.length
+        ? el("button.btn.btn-outline", { text: "👥 استيراد اللاعبين والطاقم", onclick: () => importRosterFlow(state) }) : null,
     ]),
   ]);
   if (!teams.length) wrap.appendChild(emptyState("👥", "أضف فرق البطولة"));
@@ -1842,7 +1848,7 @@ function renderMatchesTab(host, state) {
   // المسجِّل لا يُنشئ/يولّد/يعدّل بيانات المباراة — النتائج فقط عبر الشاشة المباشرة
   const bar = scorerOnly ? null : el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
     el("button.btn.btn-primary", { text: "＋ " + t.addMatch, onclick: () => matchForm(state, null) }),
-    el("button.btn.btn-accent", { text: "⚡ " + t.generateFixtures, onclick: () => generateFixtures(state) }),
+    SHOW_SETUP_TOOLS ? el("button.btn.btn-accent", { text: "⚡ " + t.generateFixtures, onclick: () => generateFixtures(state) }) : null,
     matches.length ? el("button.btn.btn-outline", { text: "🗓 جدولة تلقائية", onclick: () => autoScheduleForm(state) }) : null,
     matches.some((m) => (m.status || "scheduled") === "scheduled")
       ? el("button.btn.btn-outline", { text: "🗑 حذف كل المباريات المجدولة", onclick: () => removeAllScheduled(state) }) : null,
