@@ -1279,6 +1279,21 @@ export async function deleteScheduledMatches(tid) {
   return ids.length;
 }
 
+// إنشاء دفعي للاعبين/الطاقم (للاستيراد من الكشوف). كل صفّ:
+// { tournament_id, team_id, name, number, role, sort_order }. يعيد عدد المُنشأ.
+export async function importPlayers(rows) {
+  if (!rows.length) return 0;
+  const d = requireDb();
+  let done = 0;
+  for (let i = 0; i < rows.length; i += 450) {
+    const b = writeBatch(d);
+    for (const r of rows.slice(i, i + 450)) b.set(doc(collection(d, "players")), clean(r));
+    await b.commit();
+    done += Math.min(450, rows.length - i);
+  }
+  return done;
+}
+
 // ---- تعبئة بطولة تجريبية (بيانات الإكسل) -----------------------------------
 
 export async function seedSampleTournament() {

@@ -7,6 +7,7 @@ import { el, mount, clear, spinner, emptyState, toast, openModal, confirmDialog,
 import * as api from "./data.js";
 import { groupByDay, eventIcon, renderBracket, knockoutRoundName, shareCompetitionFlow } from "./render.js";
 import { openSettings, applyPrefs } from "./settings.js";
+import { ROSTER } from "./roster-data.js";
 
 const app = document.getElementById("app");
 const userBox = document.getElementById("user-box");
@@ -1539,8 +1540,9 @@ function renderTeamsAdmin(host, state) {
   const groupById = new Map(groups.map((g) => [g.id, g]));
   const wrap = el("div", {}, [
     el("p.page-sub", { style: "margin-bottom:12px", text: "كل الفرق. عدّل بيت كل فريق من زرّ التعديل (اتركه «بدون بيت» لخروج المغلوب أو الدوري الفردي)." }),
-    el("div", { style: "margin-bottom:16px" }, [
+    el("div", { style: "display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px" }, [
       el("button.btn.btn-primary", { text: "＋ " + t.addTeam, onclick: () => teamForm(tournament.id, groups, null) }),
+      teams.length ? el("button.btn.btn-outline", { text: "👥 استيراد اللاعبين والطاقم", onclick: () => importRosterFlow(state) }) : null,
     ]),
   ]);
   if (!teams.length) wrap.appendChild(emptyState("👥", "أضف فرق البطولة"));
@@ -1869,6 +1871,61 @@ async function removeAllScheduled(state) {
     const done = await api.deleteScheduledMatches(tournament.id);
     toast(`حُذفت ${done} مباراة ✓`, "ok"); route();
   } catch (e) { toast(e.message || t.errorGeneric, "err"); }
+}
+
+// ---- استيراد اللاعبين والطاقم من الكشوف (roster-data.js) --------------------
+function importRosterFlow(state) {
+  const { tournament, teams } = state;
+  const players = state.players || [];
+  const byName = new Map(teams.map((tm) => [String(tm.name).trim(), tm]));
+  const haveMembers = new Set(players.map((p) => p.team_id));   // فرق لديها أعضاء أصلاً
+  const rows = [], matched = [], skipped = [], unmatched = [];
+  for (const [rawName, info] of Object.entries(ROSTER || {})) {
+    const name = String(rawName).trim();
+    const team = byName.get(name);
+    if (!team) { unmatched.push(name); continue; }
+    if (haveMembers.has(team.id)) { skipped.push(name); continue; }   // تفادي التكرار
+    let order = 0;
+    for (const pl of (info.players || []))
+      rows.push({ tournament_id: tournament.id, team_id: team.id, name: String(pl.name).trim(),
+        number: pl.number ?? null, role: "player", sort_order: ++order });
+    for (const off of (info.officials || []))
+      rows.push({ tournament_id: tournament.id, team_id: team.id, name: String(off).trim(),
+        number: null, role: "management", sort_order: ++order });
+    matched.push({ name, players: (info.players || []).length, officials: (info.officials || []).length });
+  }
+  if (!rows.length)
+    return toast(skipped.length ? "كل الفرق ذات الكشوف لديها لاعبون مسبقاً — لا جديد" : "لا توجد بيانات مطابقة للاستيراد", "");
+
+  const list = el("div", { style: "max-height:44vh;overflow:auto;text-align:start" });
+  for (const m of matched)
+    list.appendChild(el("div", { style: "display:flex;gap:10px;padding:3px 4px;font-size:13px" }, [
+      el("b", { style: "min-width:150px", text: m.name }),
+      el("span", { text: `${m.players} لاعب · ${m.officials} مسؤول` }),
+    ]));
+  if (skipped.length) list.appendChild(el("p.page-sub", { style: "margin-top:8px;opacity:.7", text: `تخطّي (لديها لاعبون مسبقاً): ${skipped.join("، ")}` }));
+  if (unmatched.length) list.appendChild(el("p.page-sub", { style: "margin-top:6px;color:#c0392b", text: `بلا فريق مطابق: ${unmatched.join("، ")}` }));
+
+  const totalPlayers = matched.reduce((s, m) => s + m.players, 0);
+  const totalOff = matched.reduce((s, m) => s + m.officials, 0);
+
+  let close;
+  const applyBtn = el("button.btn.btn-primary", { type: "button", text: "استيراد" });
+  applyBtn.addEventListener("click", async () => {
+    applyBtn.disabled = true; applyBtn.textContent = "جارٍ الاستيراد…";
+    try {
+      const n = await api.importPlayers(rows);
+      close(); toast(`أُضيف ${n} عضواً ✓`, "ok"); route();
+    } catch (e) { applyBtn.disabled = false; applyBtn.textContent = "استيراد"; toast(e.message || t.errorGeneric, "err"); }
+  });
+  close = openModal({
+    title: `👥 استيراد — ${matched.length} فريق · ${totalPlayers} لاعب · ${totalOff} مسؤول`,
+    body: el("div", {}, [
+      el("p.page-sub", { style: "margin-bottom:8px", text: "يُضاف اللاعبون كـ«لاعب» بأرقامهم، والمسؤولون كـ«إداري». الفرق التي لديها لاعبون تُتخطّى تفاديًا للتكرار." }),
+      list,
+    ]),
+    footer: [applyBtn, el("button.btn.btn-outline", { type: "button", text: "إلغاء", onclick: () => close() })],
+  });
 }
 
 function resultModal(m) {
