@@ -89,13 +89,19 @@ async function fetchAll() {
     var snap = await db.collection(name).get();
     return snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
   }
+  // مجموعات تتطلّب صلاحية (المالك/المدير) — إن رُفضت القراءة نُكمل بدلاً من فشل التصدير كلّه
+  async function allSafe(name) {
+    try { return await all(name); } catch (e) { console.warn("تعذّرت قراءة " + name, e); return []; }
+  }
   var res = await Promise.all([
     all("tournaments"), all("groups"), all("teams"), all("matches"),
     all("players"), all("events"), all("pcomps"), all("predictors"), all("predictions"),
+    allSafe("users"), allSafe("admins"), allSafe("members"), allSafe("suggestions"), allSafe("usernames"),
   ]);
   dataCache = {
     tournaments: res[0], groups: res[1], teams: res[2], matches: res[3],
     players: res[4], events: res[5], pcomps: res[6], predictors: res[7], predictions: res[8],
+    users: res[9], admins: res[10], members: res[11], suggestions: res[12], usernames: res[13],
   };
   return dataCache;
 }
@@ -105,6 +111,7 @@ function showCounts(d) {
     ["البطولات", d.tournaments.length], ["المباريات", d.matches.length], ["الفرق", d.teams.length],
     ["اللاعبون", d.players.length], ["الأحداث", d.events.length],
     ["المسابقات", d.pcomps.length], ["المتوقّعون", d.predictors.length], ["التوقّعات", d.predictions.length],
+    ["المستخدمون", d.users.length], ["الاقتراحات", d.suggestions.length],
   ];
   countsEl.innerHTML = counts.map(function(c){ return '<span class="chip">'+c[0]+": "+c[1]+'</span>'; }).join("");
 }
@@ -118,6 +125,8 @@ function exportJson(d) {
       tournaments: d.tournaments.length, groups: d.groups.length, teams: d.teams.length,
       matches: d.matches.length, players: d.players.length, events: d.events.length,
       pcomps: d.pcomps.length, predictors: d.predictors.length, predictions: d.predictions.length,
+      users: d.users.length, admins: d.admins.length, members: d.members.length,
+      suggestions: d.suggestions.length, usernames: d.usernames.length,
     },
     collections: d,
   };
@@ -278,6 +287,20 @@ function exportExcel(d) {
       })
     ));
   }
+
+  // ---- الحسابات والصلاحيات (تظهر للمالك المسجَّل؛ تبقى فارغة لغيره) ----
+  var users=d.users||[], admins=d.admins||[], members=d.members||[], suggestions=d.suggestions||[], usernames=d.usernames||[];
+  if (users.length) addSheet("المستخدمون", [["المعرّف","الاسم","اسم المستخدم","البريد","محظور","تاريخ الإنشاء"]].concat(
+    users.map(function(u){ return [u.id||"", u.name||u.display_name||"", u.username||"", u.email||"", u.banned?"نعم":"", u.created_at?new Date(u.created_at).toLocaleString("ar"):""]; })
+  ));
+  if (admins.length) addSheet("مدراء المنصّة", [["البريد/المعرّف"]].concat(admins.map(function(a){ return [a.id||""]; })));
+  if (members.length) addSheet("الأعضاء المعتمدون", [["البريد/المعرّف"]].concat(members.map(function(m){ return [m.id||""]; })));
+  if (usernames.length) addSheet("أسماء المستخدمين", [["اسم المستخدم","المعرّف"]].concat(
+    usernames.map(function(u){ return [u.id||"", u.uid||""]; })
+  ));
+  if (suggestions.length) addSheet("الاقتراحات", [["الاسم","النص","التاريخ"]].concat(
+    suggestions.map(function(s){ return [s.name||"", s.text||s.message||"", s.created_at?new Date(s.created_at).toLocaleString("ar"):""]; })
+  ));
 
   XLSX.writeFile(wb, "نسخة-احتياطية-البطولات-" + stamp() + ".xlsx");
 }
